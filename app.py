@@ -12,6 +12,13 @@ from ai_lca.brightway_search import list_databases, search_candidates
 
 load_dotenv()
 
+ITEM_TYPES = [
+    "technosphere_flow",
+    "biosphere_flow",
+    "parameter",
+    "reference_product",
+]
+
 st.set_page_config(page_title="AI-LCA Foreground Builder", layout="wide")
 st.title("AI-LCA Foreground Builder")
 st.caption("AI proposes → deterministic validation → human approves → Brightway calculates")
@@ -66,7 +73,7 @@ source_text = pasted_text.strip() or pdf_preview.strip()
 
 if st.button("1. Extract proposed inventory", type="primary", disabled=not bool(source_text)):
     try:
-        with st.spinner("Extracting structured foreground inventory…"):
+        with st.spinner("Extracting and classifying LCA-relevant information…"):
             extraction = extract_inventory_from_text(
                 source_text,
                 model=model,
@@ -80,7 +87,7 @@ if st.button("1. Extract proposed inventory", type="primary", disabled=not bool(
 
 if "extraction" in st.session_state:
     extraction = st.session_state["extraction"]
-    st.subheader("Proposed foreground inventory")
+    st.subheader("Proposed LCA information")
 
     meta1, meta2 = st.columns(2)
     meta1.write(f"**Process:** {extraction.process_name or 'Not identified'}")
@@ -100,11 +107,25 @@ if "extraction" in st.session_state:
         column_config={
             "include": st.column_config.CheckboxColumn("Include"),
             "flow_id": st.column_config.NumberColumn("Flow ID", disabled=True),
+            "item_type": st.column_config.SelectboxColumn(
+                "Item type",
+                options=ITEM_TYPES,
+                required=True,
+                help="Only technosphere_flow items are sent to the ecoinvent candidate search.",
+            ),
             "evidence_text": st.column_config.TextColumn("Evidence", width="large"),
         },
         key="inventory_editor",
     )
     st.session_state["inventory_df"] = edited_df
+
+    included_df = edited_df[edited_df["include"] == True]  # noqa: E712
+    if not included_df.empty:
+        counts = included_df["item_type"].value_counts().to_dict()
+        st.caption(
+            "Routing: "
+            + ", ".join(f"{item_type}={counts.get(item_type, 0)}" for item_type in ITEM_TYPES)
+        )
 
     left, right = st.columns(2)
     with left:
@@ -127,21 +148,40 @@ if "extraction" in st.session_state:
         locations = [x.strip() for x in locations_text.split(",") if x.strip()]
         candidate_map: dict[int, list[dict]] = {}
         progress = st.progress(0.0)
-        included = edited_df[edited_df["include"] == True].reset_index(drop=True)  # noqa: E712
-        for n, (_, row) in enumerate(included.iterrows(), start=1):
-            flow_id = int(row.get("flow_id", n - 1))
-            query = str(row.get("name", "")).strip()
-            try:
-                candidate_map[flow_id] = search_candidates(
-                    project_name=project_name,
-                    database_name=database_name,
-                    query=query,
-                    locations=locations,
-                    limit=candidate_limit,
-                )
-            except Exception as exc:
-                candidate_map[flow_id] = [{"error": str(exc)}]
-            progress.progress(n / max(len(included), 1))
+
+        searchable = edited_df[
+            (edited_df["include"] == True)  # noqa: E712
+            & (edited_df["item_type"] == "technosphere_flow")
+        ].reset_index(drop=True)
+
+        skipped = edited_df[
+            (edited_df["include"] == True)  # noqa: E712
+            & (edited_df["item_type"] != "technosphere_flow")
+        ]
+        if not skipped.empty:
+            st.info(
+                f"Skipped {len(skipped)} included item(s) that are parameters, biosphere flows, or reference products. "
+                "They remain in the reviewed model information but are not searched in ecoinvent."
+            )
+
+        if searchable.empty:
+            st.warning("No included technosphere flows are available for ecoinvent search.")
+        else:
+            for n, (_, row) in enumerate(searchable.iterrows(), start=1):
+                flow_id = int(row.get("flow_id", n - 1))
+                query = str(row.get("name", "")).strip()
+                try:
+                    candidate_map[flow_id] = search_candidates(
+                        project_name=project_name,
+                        database_name=database_name,
+                        query=query,
+                        locations=locations,
+                        limit=candidate_limit,
+                    )
+                except Exception as exc:
+                    candidate_map[flow_id] = [{"error": str(exc)}]
+                progress.progress(n / max(len(searchable), 1))
+
         st.session_state["candidates"] = candidate_map
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
