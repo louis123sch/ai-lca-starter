@@ -17,16 +17,15 @@ Rules:
 5. Keep outputs/co-products distinct from inputs.
 6. Preserve the stated basis (per kg product, per year, per plant, etc.). Do not silently convert bases.
 7. Include a short evidence_text snippet for every extracted item.
-8. Use [SOURCE filename] markers to populate source_document. Use [PAGE N] markers to populate page only when available. Use [TABLE N] markers to populate table when available.
-9. When multiple documents are supplied, keep evidence tied to the document where it appears. Do not merge conflicting values silently; preserve both or flag the conflict in assumptions_or_warnings.
-10. Record ambiguity, missing denominators, allocation issues, unclear units, conflicting sources, or possible double counting in assumptions_or_warnings.
-11. Classify every item using exactly one item_type:
+8. Use [PAGE N] markers to populate page only when available. Use [TABLE N] markers to populate table when available.
+9. Record ambiguity, missing denominators, allocation issues, unclear units, conflicting values, or possible double counting in assumptions_or_warnings.
+10. Classify every item using exactly one item_type:
     - technosphere_flow: purchased/consumed materials, fuels, electricity, transport, services, or infrastructure exchanges that may map to a background activity.
     - biosphere_flow: direct elementary flows such as emissions to air/water/soil or resource extraction.
     - parameter: model/scaling values such as plant lifetime, operating hours per year, capacity, efficiency, yield, load factor, degradation rate, or utilisation. Parameters must NOT be treated as ecoinvent-searchable flows.
     - reference_product: the modelled product/output or co-product used to define the foreground activity or functional unit.
-12. Plant lifetime, operating hours, capacity, efficiency, yield, and load factor are parameters even when they have units.
-13. The result is a proposal for human review, not an approved LCA model.
+11. Plant lifetime, operating hours, capacity, efficiency, yield, and load factor are parameters even when they have units.
+12. The result is a proposal for human review, not an approved LCA model.
 """
 
 
@@ -36,12 +35,9 @@ def extract_inventory_from_text(
     model: str | None = None,
     api_key: str | None = None,
     extra_instructions: str = "",
+    source_document: str | None = None,
 ) -> InventoryExtraction:
-    """Extract an auditable proposed inventory using OpenAI Structured Outputs.
-
-    The OpenAI Python SDK's Pydantic parser converts the model output directly into
-    ``InventoryExtraction`` and raises if the result does not satisfy the schema.
-    """
+    """Extract one auditable proposed inventory using OpenAI Structured Outputs."""
     text = (text or "").strip()
     if not text:
         raise ValueError("No source text supplied")
@@ -50,9 +46,14 @@ def extract_inventory_from_text(
     chosen_model = model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
     user_prompt = (
-        "Extract and classify the LCA-relevant information from the source material below. "
+        "Extract and classify the LCA-relevant information from this source. "
         "Treat values as unapproved until human review.\n\n"
     )
+    if source_document:
+        user_prompt += f"Source filename: {source_document}\n"
+        user_prompt += (
+            "The application will enforce this filename on all extracted evidence after parsing.\n\n"
+        )
     if extra_instructions.strip():
         user_prompt += f"Study-specific instructions:\n{extra_instructions.strip()}\n\n"
     user_prompt += f"SOURCE MATERIAL:\n{text}"
@@ -72,4 +73,8 @@ def extract_inventory_from_text(
     if message.parsed is None:
         raise RuntimeError("The model returned no parsed structured inventory")
 
-    return message.parsed
+    parsed = message.parsed
+    if source_document:
+        for flow in parsed.flows:
+            flow.evidence.source_document = source_document
+    return parsed
