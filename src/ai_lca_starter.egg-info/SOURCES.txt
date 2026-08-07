@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+src/ai_lca/__init__.py
+src/ai_lca/brightway_search.py
+src/ai_lca/documents.py
+src/ai_lca/export.py
+src/ai_lca/llm.py
+src/ai_lca/models.py
+src/ai_lca_starter.egg-info/PKG-INFO
+src/ai_lca_starter.egg-info/SOURCES.txt
+src/ai_lca_starter.egg-info/dependency_links.txt
+src/ai_lca_starter.egg-info/requires.txt
+src/ai_lca_starter.egg-info/top_level.txt
+tests/test_documents.py
+tests/test_models.py
