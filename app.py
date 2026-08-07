@@ -316,7 +316,13 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
         st.dataframe(display[["rank", "match_score", "name", "reference_product", "location", "unit", "match_reasons", "database", "code"]], width="stretch", hide_index=True)
 
         labels = [f"{c['name']} | {c['reference_product']} | {c['location']} | {c['unit']}" for c in candidates]
-        choice = st.selectbox("Approve mapping", ["— no selection —"] + labels, key=f"mapping_{flow_id}")
+        choice = st.selectbox(
+            "Approve mapping",
+            labels + ["— no selection —"],
+            index=0,
+            key=f"mapping_{flow_id}",
+            help="The highest-ranked candidate is pre-selected. Review and change it if needed.",
+        )
         if choice != "— no selection —":
             chosen = candidates[labels.index(choice)]
             mapping_rows.append({"flow_id": flow_id, "parent_process": parent, "flow_name": flow_name, "search_concept": row.get("ecoinvent_search_term"), "study_geography": study_location_preference, **chosen})
