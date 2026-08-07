@@ -5,8 +5,8 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from ai_lca.documents import extract_document_text, combine_document_texts
-from ai_lca.llm import extract_inventory_from_text
+from ai_lca.documents import extract_document_text
+from ai_lca.pipeline import extract_inventory_from_sources
 from ai_lca.export import extraction_to_dataframe, dataframe_to_json
 from ai_lca.brightway_search import list_databases, search_candidates
 
@@ -42,35 +42,55 @@ with st.sidebar:
         except Exception as exc:
             st.warning(f"Brightway project not available yet: {exc}")
 
-paste_tab, upload_tab = st.tabs(["Paste text", "Upload documents"])
+st.subheader("1. Add source material")
+upload_tab, paste_tab = st.tabs(["Upload documents", "Paste text"])
 
-with paste_tab:
-    pasted_text = st.text_area(
-        "Paste paper text, technical documentation, datasheet text, or engineering notes",
-        height=320,
-        placeholder="Paste the relevant source material here…",
-    )
+extracted_documents: list[tuple[str, str]] = []
 
 with upload_tab:
     uploaded_files = st.file_uploader(
-        "Drag and drop PDF or Word documents here",
+        "Drop PDF or Word files here",
         type=["pdf", "docx"],
         accept_multiple_files=True,
-        help="You can select or drag in several PDF and .docx files at once.",
+        help="Drag several files from Finder into this box, or click Browse files.",
     )
 
-    extracted_documents: list[tuple[str, str]] = []
     if uploaded_files:
-        st.caption(f"{len(uploaded_files)} document(s) selected")
+        file_status_rows = []
         for uploaded_file in uploaded_files:
             try:
                 extracted_text = extract_document_text(uploaded_file.getvalue(), uploaded_file.name)
                 extracted_documents.append((uploaded_file.name, extracted_text))
-                st.success(f"{uploaded_file.name}: extracted {len(extracted_text):,} characters")
-                with st.expander(f"Preview — {uploaded_file.name}"):
-                    st.text(extracted_text[:12000])
+                file_status_rows.append(
+                    {
+                        "document": uploaded_file.name,
+                        "type": uploaded_file.name.rsplit(".", 1)[-1].lower(),
+                        "characters_extracted": len(extracted_text),
+                        "status": "ready",
+                    }
+                )
             except Exception as exc:
-                st.error(f"{uploaded_file.name}: {exc}")
+                file_status_rows.append(
+                    {
+                        "document": uploaded_file.name,
+                        "type": uploaded_file.name.rsplit(".", 1)[-1].lower(),
+                        "characters_extracted": 0,
+                        "status": f"error: {exc}",
+                    }
+                )
+
+        st.dataframe(pd.DataFrame(file_status_rows), hide_index=True, width="stretch")
+
+        for source_name, source_text_preview in extracted_documents:
+            with st.expander(f"Preview extracted text — {source_name}"):
+                st.text(source_text_preview[:12000])
+
+with paste_tab:
+    pasted_text = st.text_area(
+        "Paste additional paper text, datasheet text, or engineering notes",
+        height=260,
+        placeholder="Optional: paste additional source material here…",
+    )
 
 extra_instructions = st.text_area(
     "Optional study instructions",
@@ -78,23 +98,24 @@ extra_instructions = st.text_area(
     height=90,
 )
 
-source_parts: list[tuple[str, str]] = []
+source_parts: list[tuple[str, str]] = list(extracted_documents)
 if pasted_text.strip():
-    source_parts.append(("pasted_text", f"[SOURCE pasted_text]\n{pasted_text.strip()}"))
-source_parts.extend(extracted_documents)
-source_text = combine_document_texts(source_parts) if source_parts else ""
+    source_parts.append(("pasted_text", pasted_text.strip()))
 
 if source_parts:
-    st.caption(
-        f"Extraction source set: {len(source_parts)} source(s) — "
+    st.info(
+        f"Ready to analyse {len(source_parts)} source(s): "
         + ", ".join(name for name, _ in source_parts)
+        + ". Each source will be analysed independently, then merged for review."
     )
 
-if st.button("1. Extract proposed inventory", type="primary", disabled=not bool(source_text)):
+if st.button("2. Extract proposed LCA information", type="primary", disabled=not bool(source_parts)):
     try:
-        with st.spinner("Extracting and classifying LCA-relevant information…"):
-            extraction = extract_inventory_from_text(
-                source_text,
+        with st.spinner(
+            f"Analysing {len(source_parts)} source(s) independently and merging the results…"
+        ):
+            extraction = extract_inventory_from_sources(
+                source_parts,
                 model=model,
                 extra_instructions=extra_instructions,
             )
@@ -106,11 +127,11 @@ if st.button("1. Extract proposed inventory", type="primary", disabled=not bool(
 
 if "extraction" in st.session_state:
     extraction = st.session_state["extraction"]
-    st.subheader("Proposed LCA information")
+    st.subheader("3. Review extracted LCA information")
 
     meta1, meta2 = st.columns(2)
-    meta1.write(f"**Process:** {extraction.process_name or 'Not identified'}")
-    meta2.write(f"**Functional unit:** {extraction.functional_unit or 'Not identified'}")
+    meta1.write(f"**Process:** {extraction.process_name or 'Needs review'}")
+    meta2.write(f"**Functional unit:** {extraction.functional_unit or 'Needs review'}")
     st.write(extraction.source_summary)
 
     if extraction.assumptions_or_warnings:
@@ -132,7 +153,7 @@ if "extraction" in st.session_state:
                 required=True,
                 help="Only technosphere_flow items are sent to the ecoinvent candidate search.",
             ),
-            "source_document": st.column_config.TextColumn("Source document"),
+            "source_document": st.column_config.TextColumn("Source", disabled=True),
             "evidence_text": st.column_config.TextColumn("Evidence", width="large"),
         },
         key="inventory_editor",
@@ -164,7 +185,7 @@ if "extraction" in st.session_state:
         )
 
     can_search = bool(project_name and database_name)
-    if st.button("2. Search ecoinvent candidates", disabled=not can_search):
+    if st.button("4. Search ecoinvent candidates", disabled=not can_search):
         locations = [x.strip() for x in locations_text.split(",") if x.strip()]
         candidate_map: dict[int, list[dict]] = {}
         progress = st.progress(0.0)
@@ -205,7 +226,7 @@ if "extraction" in st.session_state:
         st.session_state["candidates"] = candidate_map
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
-    st.subheader("Candidate background processes")
+    st.subheader("5. Candidate background processes")
     st.caption("These are real results returned by your selected Brightway database. The prototype does not auto-approve them.")
     mapping_rows = []
     inv_df = st.session_state["inventory_df"]
