@@ -13,6 +13,7 @@ def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
                 "include": True,
                 "flow_id": i,
                 "name": flow.name,
+                "item_type": flow.item_type,
                 "amount": flow.amount,
                 "unit": flow.unit,
                 "direction": flow.direction,
