@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from ai_foreground_interpreter import extract_inventory_from_text
-from data_models import ForegroundProcessProposal, InventoryExtraction
+from data_models import ForegroundProcessProposal, InventoryExtraction, OperatingContextProposal
 
 
 def merge_inventory_extractions(extracted_sources: list[tuple[str, InventoryExtraction]]) -> InventoryExtraction:
-    """Merge independently interpreted sources while preserving evidence and process context."""
+    """Merge independently interpreted sources while preserving evidence, process, and operating context."""
     if not extracted_sources:
         raise ValueError("No extracted sources supplied")
 
@@ -18,6 +18,7 @@ def merge_inventory_extractions(extracted_sources: list[tuple[str, InventoryExtr
     functional_units: list[str] = []
     system_descriptions: list[str] = []
     foreground_processes: list[ForegroundProcessProposal] = []
+    operating_contexts: list[OperatingContextProposal] = []
     seen_processes: set[tuple[str, str]] = set()
 
     for source_name, extraction in extracted_sources:
@@ -31,6 +32,10 @@ def merge_inventory_extractions(extracted_sources: list[tuple[str, InventoryExtr
             if key not in seen_processes:
                 seen_processes.add(key)
                 foreground_processes.append(process)
+
+        for context in extraction.operating_contexts:
+            context.source_document = source_name
+            operating_contexts.append(context)
 
         warnings.extend(f"{source_name}: {warning}" for warning in extraction.assumptions_or_warnings)
         if extraction.process_name:
@@ -53,6 +58,18 @@ def merge_inventory_extractions(extracted_sources: list[tuple[str, InventoryExtr
     if len(unique_functional_units) > 1:
         warnings.append("Multiple functional units were identified across sources: " + "; ".join(unique_functional_units))
 
+    supported_locations = [
+        context.ecoinvent_location_hint
+        for context in operating_contexts
+        if context.geography_basis != "not_specified" and context.ecoinvent_location_hint
+    ]
+    unique_locations = list(dict.fromkeys(supported_locations))
+    if len(unique_locations) > 1:
+        warnings.append(
+            "Sources propose different intended operating geographies: " + "; ".join(unique_locations)
+            + ". Review the study geography before ecoinvent matching."
+        )
+
     source_names = [source_name for source_name, _ in extracted_sources]
     return InventoryExtraction(
         process_name=unique_process_names[0] if len(unique_process_names) == 1 else None,
@@ -60,6 +77,7 @@ def merge_inventory_extractions(extracted_sources: list[tuple[str, InventoryExtr
         functional_unit=unique_functional_units[0] if len(unique_functional_units) == 1 else None,
         system_description="\n".join(system_descriptions) if system_descriptions else None,
         foreground_processes=foreground_processes,
+        operating_contexts=operating_contexts,
         source_summary=(f"Independent two-pass foreground interpretation from {len(source_names)} source(s): " + ", ".join(source_names)),
         assumptions_or_warnings=warnings,
         flows=flows,
