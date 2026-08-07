@@ -67,7 +67,11 @@ def _activity_type(name: str) -> str:
     return "transforming"
 
 
-def _query_variants(query: str, activity_type_hint: str | None = None) -> list[str]:
+def _query_variants(
+    query: str,
+    activity_type_hint: str | None = None,
+    technology_hint: str | None = None,
+) -> list[str]:
     query = (query or "").strip()
     if not query:
         return []
@@ -82,6 +86,10 @@ def _query_variants(query: str, activity_type_hint: str | None = None) -> list[s
         variants.append(f"{query} operation")
     elif hint == "construction" and "construction" not in query.lower():
         variants.append(f"{query} construction")
+
+    technology_hint = (technology_hint or "").strip()
+    if technology_hint:
+        variants.append(f"{query} {technology_hint}")
 
     return list(dict.fromkeys(variants))
 
@@ -157,7 +165,7 @@ def search_candidates(
 ) -> list[dict]:
     """Retrieve and rank real Brightway activities without fabricating dataset names.
 
-    Location and activity-type hints influence ranking but do not exclude the global search pool.
+    Location and semantic hints influence retrieval/ranking but do not exclude the global search pool.
     """
     set_project(project_name)
     if database_name not in bd.databases:
@@ -173,7 +181,7 @@ def search_candidates(
     ]
     preferred_locations = list(dict.fromkeys(preferred_locations))
 
-    variants = _query_variants(query, activity_type_hint)
+    variants = _query_variants(query, activity_type_hint, technology_hint)
     pool_limit = max(25, limit * 4)
     collected: list[tuple[object, int]] = []
     seen: set[tuple] = set()
