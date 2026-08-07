@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from ai_lca.documents import extract_document_text
 from ai_lca.pipeline import extract_inventory_from_sources
-from ai_lca.export import extraction_to_dataframe, dataframe_to_json
+from ai_lca.export import extraction_to_dataframe, dataframe_to_json, searchable_exchanges
 from ai_lca.brightway_search import list_databases, search_candidates
 
 load_dotenv()
@@ -18,17 +18,27 @@ ITEM_TYPES = [
     "parameter",
     "reference_product",
 ]
+ACTIVITY_TYPES = [
+    "market",
+    "transforming",
+    "treatment",
+    "transport",
+    "service",
+    "construction",
+    "operation",
+    "unknown",
+]
 
 st.set_page_config(page_title="AI-LCA Foreground Builder", layout="wide")
 st.title("AI-LCA Foreground Builder")
-st.caption("AI proposes → deterministic validation → human approves → Brightway calculates")
+st.caption("AI reads and interprets → deterministic validation → human approves → Brightway retrieves")
 
 with st.sidebar:
     st.header("Configuration")
     model = st.text_input("OpenAI model", value=os.getenv("OPENAI_MODEL", "gpt-5-mini"))
     project_name = st.text_input("Brightway project", value=os.getenv("BRIGHTWAY_PROJECT", ""))
     locations_text = st.text_input("Preferred ecoinvent locations", value="GB,RER,GLO,RoW")
-    candidate_limit = st.slider("Candidates per flow", 3, 20, 8)
+    candidate_limit = st.slider("Candidates per exchange", 3, 20, 8)
 
     database_name = ""
     if project_name:
@@ -52,7 +62,7 @@ with upload_tab:
         "Drop PDF or Word files here",
         type=["pdf", "docx"],
         accept_multiple_files=True,
-        help="Drag several files from Finder into this box, or click Browse files.",
+        help="Each source is interpreted independently before the proposed foregrounds are merged.",
     )
 
     if uploaded_files:
@@ -80,7 +90,6 @@ with upload_tab:
                 )
 
         st.dataframe(pd.DataFrame(file_status_rows), hide_index=True, width="stretch")
-
         for source_name, source_text_preview in extracted_documents:
             with st.expander(f"Preview extracted text — {source_name}"):
                 st.text(source_text_preview[:12000])
@@ -94,7 +103,10 @@ with paste_tab:
 
 extra_instructions = st.text_area(
     "Optional study instructions",
-    placeholder="Example: Focus on cradle-to-gate foreground inputs for 1 kg H2; keep infrastructure and operation separate.",
+    placeholder=(
+        "Example: Model cradle-to-gate hydrogen production in GB. Preserve distinct capture/compression stages "
+        "only where the source supports them."
+    ),
     height=90,
 )
 
@@ -106,13 +118,13 @@ if source_parts:
     st.info(
         f"Ready to analyse {len(source_parts)} source(s): "
         + ", ".join(name for name, _ in source_parts)
-        + ". Each source will be analysed independently, then merged for review."
+        + ". Each source uses two AI passes: process understanding first, selective foreground extraction second."
     )
 
-if st.button("2. Extract proposed LCA information", type="primary", disabled=not bool(source_parts)):
+if st.button("2. Read documents and propose foreground", type="primary", disabled=not bool(source_parts)):
     try:
         with st.spinner(
-            f"Analysing {len(source_parts)} source(s) independently and merging the results…"
+            f"Understanding {len(source_parts)} source(s), then extracting ecoinvent-linkable foreground exchanges…"
         ):
             extraction = extract_inventory_from_sources(
                 source_parts,
@@ -127,32 +139,75 @@ if st.button("2. Extract proposed LCA information", type="primary", disabled=not
 
 if "extraction" in st.session_state:
     extraction = st.session_state["extraction"]
-    st.subheader("3. Review extracted LCA information")
+    st.subheader("3. Review AI foreground interpretation")
 
-    meta1, meta2 = st.columns(2)
-    meta1.write(f"**Process:** {extraction.process_name or 'Needs review'}")
-    meta2.write(f"**Functional unit:** {extraction.functional_unit or 'Needs review'}")
-    st.write(extraction.source_summary)
+    meta1, meta2, meta3 = st.columns(3)
+    meta1.write(f"**Technology:** {extraction.technology_name or 'Needs review'}")
+    meta2.write(f"**Top-level process:** {extraction.process_name or 'Needs review'}")
+    meta3.write(f"**Functional unit:** {extraction.functional_unit or 'Needs review'}")
+
+    if extraction.system_description:
+        st.write(extraction.system_description)
+
+    process_names = []
+    if extraction.foreground_processes:
+        st.markdown("#### Proposed foreground process context")
+        process_df = pd.DataFrame(
+            [
+                {
+                    "process": process.name,
+                    "role": process.role,
+                    "source": process.source_document,
+                    "evidence": process.evidence_text,
+                }
+                for process in extraction.foreground_processes
+            ]
+        )
+        st.dataframe(process_df, hide_index=True, width="stretch")
+        process_names = list(dict.fromkeys(process_df["process"].dropna().astype(str).tolist()))
 
     if extraction.assumptions_or_warnings:
-        with st.expander("Assumptions / warnings", expanded=True):
+        with st.expander("Interpretation notes / warnings", expanded=False):
             for warning in extraction.assumptions_or_warnings:
                 st.write(f"• {warning}")
 
+    current_df = st.session_state["inventory_df"]
+    existing_parent_processes = current_df["parent_process"].dropna().astype(str).tolist()
+    parent_process_options = [""] + list(dict.fromkeys(process_names + existing_parent_processes))
+
+    st.markdown("#### Proposed exchanges and parameters")
+    st.caption(
+        "For technosphere items, 'Search concept' is the canonical product/service sent to Brightway. "
+        "Foreground technology/scenario wording belongs in Parent process or Supplier technology, not in the search concept."
+    )
+
     edited_df = st.data_editor(
-        st.session_state["inventory_df"],
+        current_df,
         width="stretch",
         hide_index=True,
         num_rows="dynamic",
         column_config={
             "include": st.column_config.CheckboxColumn("Include"),
-            "flow_id": st.column_config.NumberColumn("Flow ID", disabled=True),
+            "flow_id": st.column_config.NumberColumn("ID", disabled=True),
+            "name": st.column_config.TextColumn("Canonical concept", width="medium"),
+            "source_label": st.column_config.TextColumn("Source wording", width="medium"),
             "item_type": st.column_config.SelectboxColumn(
-                "Item type",
-                options=ITEM_TYPES,
-                required=True,
-                help="Only technosphere_flow items are sent to the ecoinvent candidate search.",
+                "Type", options=ITEM_TYPES, required=True
             ),
+            "parent_process": st.column_config.SelectboxColumn(
+                "Parent process", options=parent_process_options
+            ),
+            "search_worthy": st.column_config.CheckboxColumn(
+                "Search ecoinvent?",
+                help="Deterministic routing still requires Type = technosphere_flow and a non-empty search concept.",
+            ),
+            "ecoinvent_search_term": st.column_config.TextColumn("Search concept", width="medium"),
+            "ecoinvent_activity_type_hint": st.column_config.SelectboxColumn(
+                "Activity hint", options=ACTIVITY_TYPES
+            ),
+            "geography_hint": st.column_config.TextColumn("Geography hint"),
+            "supplier_technology_hint": st.column_config.TextColumn("Supplier technology"),
+            "interpretation_reason": st.column_config.TextColumn("Why", width="large"),
             "source_document": st.column_config.TextColumn("Source", disabled=True),
             "evidence_text": st.column_config.TextColumn("Evidence", width="large"),
         },
@@ -160,13 +215,11 @@ if "extraction" in st.session_state:
     )
     st.session_state["inventory_df"] = edited_df
 
-    included_df = edited_df[edited_df["include"] == True]  # noqa: E712
-    if not included_df.empty:
-        counts = included_df["item_type"].value_counts().to_dict()
-        st.caption(
-            "Routing: "
-            + ", ".join(f"{item_type}={counts.get(item_type, 0)}" for item_type in ITEM_TYPES)
-        )
+    searchable = searchable_exchanges(edited_df)
+    st.caption(
+        f"{len(searchable)} exchange(s) currently eligible for ecoinvent search; "
+        f"{len(edited_df) - len(searchable)} row(s) remain foreground context/parameters/emissions/outputs or are excluded."
+    )
 
     left, right = st.columns(2)
     with left:
@@ -185,39 +238,35 @@ if "extraction" in st.session_state:
         )
 
     can_search = bool(project_name and database_name)
-    if st.button("4. Search ecoinvent candidates", disabled=not can_search):
-        locations = [x.strip() for x in locations_text.split(",") if x.strip()]
+    if st.button("4. Retrieve and rank ecoinvent candidates", disabled=not can_search):
+        default_locations = [x.strip() for x in locations_text.split(",") if x.strip()]
         candidate_map: dict[int, list[dict]] = {}
         progress = st.progress(0.0)
-
-        searchable = edited_df[
-            (edited_df["include"] == True)  # noqa: E712
-            & (edited_df["item_type"] == "technosphere_flow")
-        ].reset_index(drop=True)
-
-        skipped = edited_df[
-            (edited_df["include"] == True)  # noqa: E712
-            & (edited_df["item_type"] != "technosphere_flow")
-        ]
-        if not skipped.empty:
-            st.info(
-                f"Skipped {len(skipped)} included item(s) that are parameters, biosphere flows, or reference products. "
-                "They remain in the reviewed model information but are not searched in ecoinvent."
-            )
+        searchable = searchable_exchanges(edited_df).reset_index(drop=True)
 
         if searchable.empty:
-            st.warning("No included technosphere flows are available for ecoinvent search.")
+            st.warning("No approved technosphere search concepts are available for ecoinvent retrieval.")
         else:
             for n, (_, row) in enumerate(searchable.iterrows(), start=1):
                 flow_id = int(row.get("flow_id", n - 1))
-                query = str(row.get("name", "")).strip()
+                query = str(row.get("ecoinvent_search_term", "")).strip()
+                row_locations = []
+                geography_hint = str(row.get("geography_hint") or "").strip()
+                if geography_hint:
+                    row_locations.append(geography_hint)
+                row_locations.extend(default_locations)
+                row_locations = list(dict.fromkeys(row_locations))
+
                 try:
                     candidate_map[flow_id] = search_candidates(
                         project_name=project_name,
                         database_name=database_name,
                         query=query,
-                        locations=locations,
+                        locations=row_locations,
                         limit=candidate_limit,
+                        unit=str(row.get("unit") or "").strip() or None,
+                        activity_type_hint=str(row.get("ecoinvent_activity_type_hint") or "").strip() or None,
+                        technology_hint=str(row.get("supplier_technology_hint") or "").strip() or None,
                     )
                 except Exception as exc:
                     candidate_map[flow_id] = [{"error": str(exc)}]
@@ -226,15 +275,50 @@ if "extraction" in st.session_state:
         st.session_state["candidates"] = candidate_map
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
-    st.subheader("5. Candidate background processes")
-    st.caption("These are real results returned by your selected Brightway database. The prototype does not auto-approve them.")
+    st.subheader("5. Review real ecoinvent candidates")
+    st.caption(
+        "All candidates below come from your selected Brightway database. Match score is deterministic triage, not AI approval."
+    )
     mapping_rows = []
     inv_df = st.session_state["inventory_df"]
 
     for flow_id, candidates in st.session_state["candidates"].items():
         matching = inv_df[inv_df["flow_id"] == flow_id]
-        flow_name = matching.iloc[0]["name"] if not matching.empty else f"Flow {flow_id}"
-        st.markdown(f"### {flow_name}")
+        if matching.empty:
+            continue
+        row = matching.iloc[0]
+        flow_name = str(row.get("name") or f"Flow {flow_id}")
+        parent = str(row.get("parent_process") or "").strip()
+        heading = f"{parent} → {flow_name}" if parent else flow_name
+        st.markdown(f"### {heading}")
+        st.caption(
+            f"AI search concept: {row.get('ecoinvent_search_term') or flow_name}"
+            + (f" | geography: {row.get('geography_hint')}" if row.get("geography_hint") else "")
+            + (f" | activity hint: {row.get('ecoinvent_activity_type_hint')}" if row.get("ecoinvent_activity_type_hint") else "")
+        )
+
+        manual_query = st.text_input(
+            "Manual Brightway search",
+            value=str(row.get("ecoinvent_search_term") or flow_name),
+            key=f"manual_query_{flow_id}",
+        )
+        if st.button("Run manual search", key=f"manual_search_{flow_id}"):
+            try:
+                preferred_locations = [
+                    x for x in [str(row.get("geography_hint") or "").strip()]
+                    if x
+                ] + [x.strip() for x in locations_text.split(",") if x.strip()]
+                st.session_state["candidates"][flow_id] = search_candidates(
+                    project_name=project_name,
+                    database_name=database_name,
+                    query=manual_query,
+                    locations=preferred_locations,
+                    limit=candidate_limit,
+                    unit=str(row.get("unit") or "").strip() or None,
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
 
         if not candidates:
             st.warning("No candidates returned.")
@@ -245,11 +329,18 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
 
         display = pd.DataFrame(candidates)
         display.insert(0, "rank", range(1, len(display) + 1))
-        st.dataframe(
-            display[["rank", "name", "reference_product", "location", "unit", "database", "id", "code"]],
-            width="stretch",
-            hide_index=True,
-        )
+        display_columns = [
+            "rank",
+            "match_score",
+            "name",
+            "reference_product",
+            "location",
+            "unit",
+            "match_reasons",
+            "database",
+            "code",
+        ]
+        st.dataframe(display[display_columns], width="stretch", hide_index=True)
 
         labels = [
             f"{c['name']} | {c['reference_product']} | {c['location']} | {c['unit']}"
@@ -263,7 +354,15 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
         if choice != "— no selection —":
             chosen_index = labels.index(choice)
             chosen = candidates[chosen_index]
-            mapping_rows.append({"flow_id": flow_id, "flow_name": flow_name, **chosen})
+            mapping_rows.append(
+                {
+                    "flow_id": flow_id,
+                    "parent_process": parent,
+                    "flow_name": flow_name,
+                    "search_concept": row.get("ecoinvent_search_term"),
+                    **chosen,
+                }
+            )
 
     if mapping_rows:
         mapping_df = pd.DataFrame(mapping_rows)
