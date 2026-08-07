@@ -1,105 +1,74 @@
 # AI-LCA Foreground Builder — starter prototype
 
-This repository is a human-in-the-loop AI-assisted LCA prototype built around Brightway.
-
-The design principle is:
+Human-in-the-loop AI-assisted LCA prototype built around Brightway.
 
 > **AI interprets and proposes → deterministic software validates → human approves → Brightway retrieves/calculates.**
 
-## Current workflow
+## Working files are at the repository root
 
-1. Paste technical text or drag and drop multiple source documents.
-2. Read machine-readable PDF (`.pdf`) and Word (`.docx`) files locally.
-3. Preserve source filename provenance, PDF page markers, and Word table markers.
-4. Run a **two-pass AI interpretation for each source**:
-   - Pass 1: understand the technology/system and foreground process context.
-   - Pass 2: selectively extract foreground exchanges that plausibly link to ecoinvent, plus useful parameters/emissions/outputs.
-5. Review/edit the proposed foreground interpretation in Streamlit.
-6. Retrieve real candidate activities from the selected local Brightway/ecoinvent database.
-7. Rank those candidates deterministically using product wording, activity type, unit and geography preferences.
-8. Manually approve a real ecoinvent candidate and export the reviewed mappings.
-
-## What the AI is now asked to do
-
-The AI is not supposed to copy source labels directly into ecoinvent search.
-
-For example:
-
-```text
-Source wording: "Natural gas - SMR + CCS 90%"
-
-AI foreground interpretation:
-- canonical concept: natural gas
-- parent foreground process: SMR
-- ecoinvent search concept: natural gas
-- likely activity type: market
-- geography hint: GB (only if supported)
-- 90% capture: separate model parameter, not an ecoinvent-searchable flow
-```
-
-The extraction keeps separate fields for:
-
-- canonical LCA concept
-- original/source wording
-- parent foreground process/stage
-- amount and unit
-- ecoinvent search concept
-- activity-type hint (`market`, `transforming`, `treatment`, etc.)
-- geography hint
-- explicitly stated supplier technology/provenance
-- short interpretation rationale
-- source/page/table/evidence provenance
-
-The AI may use ecoinvent naming semantics to propose how an exchange should be searched, but it **must not invent an exact ecoinvent dataset**. Brightway is the authority on which activities actually exist in the installed database.
-
-## Deterministic search routing
-
-A row reaches the ecoinvent technosphere matcher only when all of the following are true:
-
-- the user has included it;
-- `item_type == technosphere_flow`;
-- `search_worthy == true`;
-- `ecoinvent_search_term` is non-empty.
-
-This means parameters such as plant lifetime, capture rate or operating hours cannot enter the background search merely because they contain numbers or technology wording.
-
-Location is a ranking preference rather than a hard exclusion. The candidate retriever also understands common ecoinvent naming patterns such as `market for ...` and `treatment of ...` when generating search variants.
-
-## Important boundary
-
-The prototype **does not yet write the approved inventory into a persistent Brightway foreground database or run LCIA automatically**. Foreground network/subprocess construction will come after document interpretation and background-process matching are reliable.
-
-Scanned/image-only PDFs are also not OCR'd in this version.
-
-## Project structure
+The project is deliberately flattened so the code you actually edit is immediately visible in VS Code.
 
 ```text
 ai-lca-starter/
-├── app.py
-├── src/ai_lca/
-│   ├── models.py
-│   ├── documents.py
-│   ├── llm.py
-│   ├── pipeline.py
-│   ├── brightway_search.py
-│   └── export.py
-├── notebooks/
-├── tests/
-├── data/
+├── app.py                              # Streamlit interface and workflow
+├── document_reader.py                  # PDF/DOCX ingestion and provenance
+├── ai_foreground_interpreter.py        # OpenAI prompts + two-pass document reasoning
+├── foreground_pipeline.py              # Multi-document interpretation/merging
+├── ecoinvent_search.py                 # Brightway retrieval and candidate ranking
+├── data_models.py                      # Pydantic schemas
+├── export_helpers.py                   # Review tables, exports, deterministic routing
+├── notebook_document_to_foreground.ipynb # Interactive workbench
+├── PROJECT_MAP.md                      # What each file does
+├── tests/                              # Automated tests only
+├── data/                               # Project/local data
+├── src/ai_lca/                         # Compatibility import shims only
 ├── .env.example
 ├── pyproject.toml
 └── README.md
 ```
 
-## Installation
+**Edit the top-level files, not `src/ai_lca/`.** The nested package now contains only compatibility redirects so older imports/tests do not break while the project is being reorganised.
 
-Use the same Python environment in which Brightway already works.
+See `PROJECT_MAP.md` for a direct “what file do I edit?” guide.
+
+## Current workflow
+
+1. Paste technical text or drag and drop multiple PDF/DOCX source documents.
+2. Preserve source/page/table provenance.
+3. Run two AI passes per source:
+   - understand the technology and foreground process context;
+   - selectively propose foreground exchanges, parameters, emissions and outputs.
+4. Review the draft foreground interpretation.
+5. Send only approved technosphere concepts to the local Brightway/ecoinvent matcher.
+6. Retrieve and rank real ecoinvent activities.
+7. Human approves the final mapping.
+
+Example interpretation:
+
+```text
+Source wording: "Natural gas - SMR + CCS 90%"
+
+canonical concept: natural gas
+parent process: SMR
+ecoinvent search concept: natural gas
+activity hint: market
+geography hint: GB (only if source-supported)
+90% capture: separate parameter, not a background search term
+```
+
+A row reaches technosphere search only when it is included, classified as `technosphere_flow`, marked `search_worthy`, and has a non-empty search concept. Brightway remains the authority on which ecoinvent datasets actually exist.
+
+## Install and run
+
+Use the Python environment where Brightway already works:
 
 ```bash
 python -m pip install -e .
+pytest
+streamlit run app.py
 ```
 
-Create a local `.env` file from `.env.example`:
+Create a local `.env` from `.env.example`:
 
 ```text
 OPENAI_API_KEY=your_key_here
@@ -107,22 +76,14 @@ OPENAI_MODEL=gpt-5-mini
 BRIGHTWAY_PROJECT=your_existing_project
 ```
 
-Never commit `.env` or API keys to GitHub.
+Never commit `.env` or API keys.
 
-## Run
+## Notebook workflow
 
-```bash
-streamlit run app.py
-```
+Open `notebook_document_to_foreground.ipynb` directly from the root to inspect the stages without Streamlit. It imports the same top-level modules as the app.
 
-The document interpretation now uses **two OpenAI calls per source document**, so it is deliberately more expensive than the earlier one-pass extractor.
+## Current boundary
 
-## Current development direction
+The prototype does **not yet** write the approved inventory into a persistent Brightway foreground database or run LCIA automatically. Foreground network/subprocess construction comes after document interpretation and ecoinvent matching are reliable.
 
-Next milestones:
-
-1. Validate the two-pass interpretation against representative technical papers/datasheets.
-2. Add AI assessment/explanation of the **real** candidates returned by Brightway.
-3. Improve hybrid lexical/semantic ecoinvent retrieval.
-4. Add explicit foreground network/subprocess review and persistent Brightway foreground construction.
-5. Add parameter/scenario handling, dynamic inputs, uncertainty and provenance-aware validation.
+Scanned/image-only PDFs also still need a later OCR/multimodal path.
