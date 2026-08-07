@@ -8,7 +8,7 @@ from data_models import DocumentUnderstanding, InventoryExtraction, InventoryIte
 
 UNDERSTANDING_PROMPT = """You are an expert life-cycle assessment modeller familiar with ecoinvent v3.
 Read the supplied technical source as a whole before proposing any inventory items.
-This first pass is ONLY for understanding the technology and foreground process context.
+This first pass is ONLY for understanding the technology, foreground process context, and intended operating/deployment context.
 
 Important ecoinvent concepts to keep in mind:
 - ecoinvent datasets represent activities; foreground inputs normally consume intermediate products/services supplied by background activities.
@@ -21,9 +21,15 @@ Rules:
 1. Identify the technology/system actually described by the source.
 2. Propose only foreground process/stage names that are explicitly described or unambiguously supported by the source. Do not add standard process stages merely because they are common in the technology.
 3. If the source clearly links an input/output to a particular stage (e.g. electricity to CO2 capture), preserve that stage relationship for the next pass.
-4. Identify explicit geography/provenance information separately from process names.
-5. Do not extract a bill of materials or list of numeric inventory items in this pass.
-6. Return concise modelling observations, not private chain-of-thought.
+4. Determine the intended operating/deployment context of the foreground system. Specifically ask: where is the plant/process intended to operate in the study, and in what operational setting?
+5. Keep intended operating geography separate from input provenance. Example: a UK hydrogen plant using Norwegian natural gas has intended geography UK/GB; Norway is a supply-provenance geography, not the plant location.
+6. Do not infer operating geography from author affiliation, publisher location, a supplier country, a cited case study used only for data, or an ecoinvent dataset location.
+7. Set geography_basis='explicit' only when the source directly locates the foreground system. Use 'strongly_inferred' only when the study framing unambiguously establishes the operating geography. Otherwise use 'not_specified', leave ecoinvent_location_hint null, and explain the ambiguity briefly.
+8. ecoinvent_location_hint is a reviewable matching hint, not an assertion. Use a concise geography such as GB, DE, RER, GLO only when sufficiently supported.
+9. Capture temporal context (reference year/future scenario) and operational setting when clearly stated.
+10. Identify other explicit geography/provenance information separately from the intended operating geography.
+11. Do not extract a bill of materials or list of numeric inventory items in this pass.
+12. Return concise modelling observations and short evidence, not private chain-of-thought.
 """
 
 
@@ -36,6 +42,7 @@ For each item:
 - Canonicalise the underlying product/service. Example: 'natural gas - SMR + CCS 90%' becomes the technosphere concept 'natural gas'; SMR/CCS is foreground context and 90% capture is a parameter if supported.
 - Assign parent_process when the source clearly links the item to one of the proposed foreground processes/stages.
 - Keep geography separate in geography_hint. Do not put GB, RER, Norway, etc. into the canonical name unless it is genuinely part of the product identity.
+- Use exchange-specific geography_hint for geography/provenance that belongs to that exchange. Do not automatically copy the study operating geography into every exchange; the application can use study geography as a matching fallback.
 - For a plausible technosphere background link, set search_worthy=true and give a concise ecoinvent_search_term representing the product/service, not an invented exact dataset name.
 - Suggest ecoinvent_activity_type_hint only as a semantic hint: market, transforming, treatment, transport, service, construction, operation, or unknown.
 - Generic purchased/traded commodities normally suggest a market; explicitly specified production technologies/suppliers may suggest transforming; wastes needing disposal suggest treatment.
@@ -64,7 +71,7 @@ def _client(api_key: str | None = None) -> OpenAI:
 
 
 def understand_document(text: str, *, model: str | None = None, api_key: str | None = None, extra_instructions: str = "", source_document: str | None = None) -> DocumentUnderstanding:
-    """First AI pass: understand technology and foreground process context."""
+    """First AI pass: understand technology, process context, and intended operating context."""
     text = (text or "").strip()
     if not text:
         raise ValueError("No source text supplied")
@@ -92,6 +99,7 @@ def understand_document(text: str, *, model: str | None = None, api_key: str | N
     if source_document:
         for process in understanding.foreground_processes:
             process.source_document = source_document
+        understanding.operating_context.source_document = source_document
     return understanding
 
 
@@ -149,6 +157,7 @@ def extract_inventory_from_text(text: str, *, model: str | None = None, api_key:
         functional_unit=items.functional_unit,
         system_description=understanding.system_description,
         foreground_processes=understanding.foreground_processes,
+        operating_contexts=[understanding.operating_context],
         source_summary=(f"Two-pass foreground interpretation of {source_document}" if source_document else "Two-pass foreground interpretation of supplied source material"),
         assumptions_or_warnings=[*understanding.interpretation_notes, *items.assumptions_or_warnings],
         flows=items.flows,
