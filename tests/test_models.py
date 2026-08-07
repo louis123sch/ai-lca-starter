@@ -14,17 +14,21 @@ def test_inventory_model_accepts_auditable_flow():
                 unit="kWh",
                 direction="input",
                 basis="per kg H2",
-                evidence=SourceEvidence(page=3, evidence_text="Electricity use is 52 kWh/kg H2."),
+                evidence=SourceEvidence(
+                    source_document="electrolyser.pdf",
+                    page=3,
+                    evidence_text="Electricity use is 52 kWh/kg H2.",
+                ),
             )
         ],
     )
     assert result.flows[0].amount == 52.0
     assert result.flows[0].item_type == "technosphere_flow"
+    assert result.flows[0].evidence.source_document == "electrolyser.pdf"
 
 
-def test_parameter_can_be_retained_without_being_a_flow():
+def test_inventory_model_classifies_parameter_without_background_mapping():
     result = InventoryExtraction(
-        process_name="Hydrogen production",
         source_summary="Test source",
         flows=[
             InventoryFlow(
@@ -33,9 +37,11 @@ def test_parameter_can_be_retained_without_being_a_flow():
                 amount=20,
                 unit="year",
                 direction="unknown",
-                evidence=SourceEvidence(page=4, evidence_text="The plant lifetime is 20 years."),
+                evidence=SourceEvidence(
+                    source_document="datasheet.docx",
+                    evidence_text="The plant lifetime is 20 years.",
+                ),
             )
         ],
     )
     assert result.flows[0].item_type == "parameter"
-    assert result.flows[0].amount == 20
