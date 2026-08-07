@@ -11,21 +11,22 @@ Your job is extraction and classification, not invention.
 
 Rules:
 1. Extract only LCA-relevant information supported by the supplied source text.
-2. Never invent an amount, unit, material, process, page, table, parameter, or functional unit.
+2. Never invent an amount, unit, material, process, page, table, parameter, source document, or functional unit.
 3. If an item is mentioned but no amount is given, amount must be null.
 4. Keep construction/capital inputs distinct from operational inputs where the source permits.
 5. Keep outputs/co-products distinct from inputs.
 6. Preserve the stated basis (per kg product, per year, per plant, etc.). Do not silently convert bases.
 7. Include a short evidence_text snippet for every extracted item.
-8. Use [PAGE N] markers to populate page only when available.
-9. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
-10. Classify every item using exactly one item_type:
+8. Use [SOURCE filename] markers to populate source_document. Use [PAGE N] markers to populate page only when available. Use [TABLE N] markers to populate table when available.
+9. When multiple documents are supplied, keep evidence tied to the document where it appears. Do not merge conflicting values silently; preserve both or flag the conflict in assumptions_or_warnings.
+10. Record ambiguity, missing denominators, allocation issues, unclear units, conflicting sources, or possible double counting in assumptions_or_warnings.
+11. Classify every item using exactly one item_type:
     - technosphere_flow: purchased/consumed materials, fuels, electricity, transport, services, or infrastructure exchanges that may map to a background activity.
     - biosphere_flow: direct elementary flows such as emissions to air/water/soil or resource extraction.
     - parameter: model/scaling values such as plant lifetime, operating hours per year, capacity, efficiency, yield, load factor, degradation rate, or utilisation. Parameters must NOT be treated as ecoinvent-searchable flows.
     - reference_product: the modelled product/output or co-product used to define the foreground activity or functional unit.
-11. Plant lifetime, operating hours, capacity, efficiency, yield, and load factor are parameters even when they have units.
-12. The result is a proposal for human review, not an approved LCA model.
+12. Plant lifetime, operating hours, capacity, efficiency, yield, and load factor are parameters even when they have units.
+13. The result is a proposal for human review, not an approved LCA model.
 """
 
 
@@ -49,7 +50,7 @@ def extract_inventory_from_text(
     chosen_model = model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
     user_prompt = (
-        "Extract and classify the LCA-relevant information from the source below. "
+        "Extract and classify the LCA-relevant information from the source material below. "
         "Treat values as unapproved until human review.\n\n"
     )
     if extra_instructions.strip():
