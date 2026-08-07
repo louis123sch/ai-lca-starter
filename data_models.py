@@ -22,6 +22,12 @@ EcoinventActivityType = Literal[
     "unknown",
 ]
 
+OperatingGeographyBasis = Literal[
+    "explicit",
+    "strongly_inferred",
+    "not_specified",
+]
+
 
 class SourceEvidence(BaseModel):
     """Evidence supporting an extracted LCA item."""
@@ -57,6 +63,54 @@ class ForegroundProcessProposal(BaseModel):
     )
 
 
+class OperatingContextProposal(BaseModel):
+    """Proposed intended operating/deployment context of the foreground system."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intended_geography: str | None = Field(
+        default=None,
+        description=(
+            "Country/region where the foreground technology is intended to operate or be deployed. "
+            "Do not confuse this with the origin/provenance of an individual input."
+        ),
+    )
+    ecoinvent_location_hint: str | None = Field(
+        default=None,
+        description=(
+            "Concise ecoinvent-style geography hint for the intended operating geography, e.g. GB, DE, RER, GLO. "
+            "Null when the operating geography is not sufficiently supported."
+        ),
+    )
+    geography_basis: OperatingGeographyBasis = Field(
+        default="not_specified",
+        description=(
+            "explicit when the source directly states the operating geography; strongly_inferred only when the "
+            "study context unambiguously establishes it; otherwise not_specified."
+        ),
+    )
+    operating_setting: str | None = Field(
+        default=None,
+        description=(
+            "Concise description of the intended operational/deployment setting, e.g. UK industrial hydrogen plant, "
+            "off-grid remote system, refinery-integrated SMR, or generic/global technology model."
+        ),
+    )
+    temporal_context: str | None = Field(
+        default=None,
+        description="Operating/reference year, future scenario, or time horizon when clearly stated.",
+    )
+    source_document: str | None = None
+    evidence_text: str | None = Field(
+        default=None,
+        description="Short source evidence supporting the geography/operating-context proposal.",
+    )
+    note: str | None = Field(
+        default=None,
+        description="Short caveat explaining ambiguity, inference, or why no operating geography can be assigned.",
+    )
+
+
 class DocumentUnderstanding(BaseModel):
     """High-level interpretation produced before inventory extraction."""
 
@@ -70,9 +124,13 @@ class DocumentUnderstanding(BaseModel):
         description="Concise description of what is being modelled and the important process context."
     )
     foreground_processes: list[ForegroundProcessProposal] = Field(default_factory=list)
+    operating_context: OperatingContextProposal = Field(
+        default_factory=OperatingContextProposal,
+        description="Intended geography and operational setting of the foreground system, kept distinct from input provenance.",
+    )
     geography_hints: list[str] = Field(
         default_factory=list,
-        description="Geographies explicitly stated or unambiguously defined by the source/study instructions.",
+        description="Other geographies explicitly stated in the source, including supply/provenance geographies.",
     )
     interpretation_notes: list[str] = Field(
         default_factory=list,
@@ -124,7 +182,7 @@ class InventoryFlow(BaseModel):
     )
     geography_hint: str | None = Field(
         default=None,
-        description="Geography kept separate from the activity/search name, e.g. GB, RER, GLO, Norway.",
+        description="Exchange-specific geography kept separate from the activity/search name, e.g. GB, RER, GLO, Norway.",
     )
     supplier_technology_hint: str | None = Field(
         default=None,
@@ -169,6 +227,7 @@ class InventoryExtraction(BaseModel):
     )
     system_description: str | None = None
     foreground_processes: list[ForegroundProcessProposal] = Field(default_factory=list)
+    operating_contexts: list[OperatingContextProposal] = Field(default_factory=list)
     source_summary: str = Field(description="One-sentence description of what source material was analysed.")
     assumptions_or_warnings: list[str] = Field(default_factory=list)
     flows: list[InventoryFlow] = Field(default_factory=list)
