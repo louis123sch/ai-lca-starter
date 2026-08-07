@@ -1,17 +1,3 @@
-"""AI-LCA starter package."""
+"""Compatibility package. Main editable code now lives at the repository root."""
 
-from .models import (
-    DocumentUnderstanding,
-    ForegroundProcessProposal,
-    InventoryExtraction,
-    InventoryFlow,
-    SourceEvidence,
-)
-
-__all__ = [
-    "DocumentUnderstanding",
-    "ForegroundProcessProposal",
-    "InventoryExtraction",
-    "InventoryFlow",
-    "SourceEvidence",
-]
+from data_models import *  # noqa: F401,F403
