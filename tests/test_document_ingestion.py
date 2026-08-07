@@ -17,6 +17,22 @@ def test_extract_docx_text_with_source_marker():
     assert "Plant lifetime is 20 years." in text
 
 
+def test_extract_docx_tables():
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Material"
+    table.cell(0, 1).text = "Mass"
+    table.cell(1, 0).text = "Steel"
+    table.cell(1, 1).text = "100 kg"
+    buffer = io.BytesIO()
+    doc.save(buffer)
+
+    text = extract_document_text(buffer.getvalue(), "inventory.docx")
+
+    assert "[TABLE 1]" in text
+    assert "Steel | 100 kg" in text
+
+
 def test_combine_document_texts_keeps_sources_separate():
     combined = combine_document_texts(
         [
