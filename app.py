@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from ai_lca.documents import extract_pdf_text
+from ai_lca.documents import extract_document_text, combine_document_texts
 from ai_lca.llm import extract_inventory_from_text
 from ai_lca.export import extraction_to_dataframe, dataframe_to_json
 from ai_lca.brightway_search import list_databases, search_candidates
@@ -42,7 +42,7 @@ with st.sidebar:
         except Exception as exc:
             st.warning(f"Brightway project not available yet: {exc}")
 
-paste_tab, pdf_tab = st.tabs(["Paste text", "Upload PDF"])
+paste_tab, upload_tab = st.tabs(["Paste text", "Upload documents"])
 
 with paste_tab:
     pasted_text = st.text_area(
@@ -51,17 +51,26 @@ with paste_tab:
         placeholder="Paste the relevant source material here…",
     )
 
-with pdf_tab:
-    uploaded_pdf = st.file_uploader("Upload a text-readable PDF", type=["pdf"])
-    pdf_preview = ""
-    if uploaded_pdf is not None:
-        try:
-            pdf_preview = extract_pdf_text(uploaded_pdf.getvalue())
-            st.success(f"Extracted machine-readable text from PDF ({len(pdf_preview):,} characters).")
-            with st.expander("Preview extracted text"):
-                st.text(pdf_preview[:12000])
-        except Exception as exc:
-            st.error(str(exc))
+with upload_tab:
+    uploaded_files = st.file_uploader(
+        "Drag and drop PDF or Word documents here",
+        type=["pdf", "docx"],
+        accept_multiple_files=True,
+        help="You can select or drag in several PDF and .docx files at once.",
+    )
+
+    extracted_documents: list[tuple[str, str]] = []
+    if uploaded_files:
+        st.caption(f"{len(uploaded_files)} document(s) selected")
+        for uploaded_file in uploaded_files:
+            try:
+                extracted_text = extract_document_text(uploaded_file.getvalue(), uploaded_file.name)
+                extracted_documents.append((uploaded_file.name, extracted_text))
+                st.success(f"{uploaded_file.name}: extracted {len(extracted_text):,} characters")
+                with st.expander(f"Preview — {uploaded_file.name}"):
+                    st.text(extracted_text[:12000])
+            except Exception as exc:
+                st.error(f"{uploaded_file.name}: {exc}")
 
 extra_instructions = st.text_area(
     "Optional study instructions",
@@ -69,7 +78,17 @@ extra_instructions = st.text_area(
     height=90,
 )
 
-source_text = pasted_text.strip() or pdf_preview.strip()
+source_parts: list[tuple[str, str]] = []
+if pasted_text.strip():
+    source_parts.append(("pasted_text", f"[SOURCE pasted_text]\n{pasted_text.strip()}"))
+source_parts.extend(extracted_documents)
+source_text = combine_document_texts(source_parts) if source_parts else ""
+
+if source_parts:
+    st.caption(
+        f"Extraction source set: {len(source_parts)} source(s) — "
+        + ", ".join(name for name, _ in source_parts)
+    )
 
 if st.button("1. Extract proposed inventory", type="primary", disabled=not bool(source_text)):
     try:
@@ -113,6 +132,7 @@ if "extraction" in st.session_state:
                 required=True,
                 help="Only technosphere_flow items are sent to the ecoinvent candidate search.",
             ),
+            "source_document": st.column_config.TextColumn("Source document"),
             "evidence_text": st.column_config.TextColumn("Evidence", width="large"),
         },
         key="inventory_editor",
