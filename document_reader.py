@@ -70,3 +70,16 @@ def extract_document_text(file_bytes: bytes, filename: str) -> str:
     if suffix == ".docx":
         return extract_docx_text(file_bytes, source_name=filename)
     raise ValueError(f"Unsupported document type '{suffix}'. Supported types are PDF and DOCX.")
+
+
+def combine_document_texts(documents: list[tuple[str, str]]) -> str:
+    """Join already-extracted document texts while preserving explicit source boundaries."""
+    cleaned: list[str] = []
+    for source_name, text in documents:
+        if not text or not text.strip():
+            continue
+        stripped = text.strip()
+        if f"[SOURCE {source_name}]" not in stripped:
+            stripped = f"[SOURCE {source_name}]\n{stripped}"
+        cleaned.append(stripped)
+    return "\n\n===== DOCUMENT BOUNDARY =====\n\n".join(cleaned)
