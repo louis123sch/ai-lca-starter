@@ -1,7 +1,9 @@
-"""AI-LCA starter package.
+"""AI-LCA starter package."""
 
-Modules are intentionally not eagerly imported here so document/model utilities can be
-used and tested even when optional runtime integrations (OpenAI/Brightway) are absent.
-"""
+from .models import InventoryExtraction, InventoryFlow, SourceEvidence
 
-__version__ = "0.1.0"
+__all__ = [
+    "InventoryExtraction",
+    "InventoryFlow",
+    "SourceEvidence",
+]
