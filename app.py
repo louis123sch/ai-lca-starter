@@ -15,6 +15,20 @@ load_dotenv()
 ITEM_TYPES = ["technosphere_flow", "biosphere_flow", "parameter", "reference_product"]
 ACTIVITY_TYPES = ["market", "transforming", "treatment", "transport", "service", "construction", "operation", "unknown"]
 
+
+def _suggested_study_location(extraction) -> str:
+    """Return one supported study-level ecoinvent geography, otherwise leave it for review."""
+    locations = [
+        context.ecoinvent_location_hint.strip()
+        for context in extraction.operating_contexts
+        if context.geography_basis != "not_specified"
+        and context.ecoinvent_location_hint
+        and context.ecoinvent_location_hint.strip()
+    ]
+    unique = list(dict.fromkeys(locations))
+    return unique[0] if len(unique) == 1 else ""
+
+
 st.set_page_config(page_title="AI-LCA Foreground Builder", layout="wide")
 st.title("AI-LCA Foreground Builder")
 st.caption("AI reads and interprets → deterministic validation → human approves → Brightway retrieves")
@@ -23,7 +37,14 @@ with st.sidebar:
     st.header("Configuration")
     model = st.text_input("OpenAI model", value=os.getenv("OPENAI_MODEL", "gpt-5-mini"))
     project_name = st.text_input("Brightway project", value=os.getenv("BRIGHTWAY_PROJECT", ""))
-    locations_text = st.text_input("Preferred ecoinvent locations", value="GB,RER,GLO,RoW")
+    locations_text = st.text_input(
+        "Additional fallback ecoinvent locations",
+        value="GB,RER,GLO,RoW",
+        help=(
+            "Used after any exchange-specific geography and the reviewed study operating geography. "
+            "These are ranking preferences, not hard filters."
+        ),
+    )
     candidate_limit = st.slider("Candidates per exchange", 3, 20, 8)
 
     database_name = ""
@@ -84,10 +105,11 @@ if sources:
 
 if st.button("2. Read documents and propose foreground", type="primary", disabled=not bool(sources)):
     try:
-        with st.spinner("Understanding the technology, then extracting ecoinvent-linkable exchanges…"):
+        with st.spinner("Understanding the technology, operating context, then extracting ecoinvent-linkable exchanges…"):
             extraction = extract_inventory_from_sources(sources, model=model, extra_instructions=extra_instructions)
         st.session_state["extraction"] = extraction
         st.session_state["inventory_df"] = extraction_to_dataframe(extraction)
+        st.session_state["study_location_preference"] = _suggested_study_location(extraction)
         st.session_state.pop("candidates", None)
     except Exception as exc:
         st.exception(exc)
@@ -102,6 +124,65 @@ if "extraction" in st.session_state:
     c3.write(f"**Functional unit:** {extraction.functional_unit or 'Needs review'}")
     if extraction.system_description:
         st.write(extraction.system_description)
+
+    st.markdown("#### Intended operating context")
+    st.caption(
+        "This is the proposed location/setting of the foreground system itself. It is kept separate from "
+        "input provenance such as Norwegian natural gas or imported electricity."
+    )
+
+    supported_contexts = []
+    if extraction.operating_contexts:
+        context_rows = []
+        for context in extraction.operating_contexts:
+            context_rows.append(
+                {
+                    "intended geography": context.intended_geography,
+                    "ecoinvent location hint": context.ecoinvent_location_hint,
+                    "basis": context.geography_basis,
+                    "operating setting": context.operating_setting,
+                    "temporal context": context.temporal_context,
+                    "source": context.source_document,
+                    "evidence": context.evidence_text,
+                    "note": context.note,
+                }
+            )
+            if context.geography_basis != "not_specified" and context.ecoinvent_location_hint:
+                supported_contexts.append(context)
+
+        context_df = pd.DataFrame(context_rows)
+        st.dataframe(context_df, hide_index=True, width="stretch")
+
+        if supported_contexts:
+            unique_hints = list(dict.fromkeys(c.ecoinvent_location_hint for c in supported_contexts if c.ecoinvent_location_hint))
+            if len(unique_hints) == 1:
+                chosen_context = supported_contexts[0]
+                st.success(
+                    f"AI operating-geography proposal: {chosen_context.intended_geography or unique_hints[0]} "
+                    f"→ ecoinvent preference {unique_hints[0]} ({chosen_context.geography_basis.replace('_', ' ')})."
+                )
+            else:
+                st.warning(
+                    "The sources imply different operating geographies. Review them and choose the study geography manually below."
+                )
+        else:
+            st.warning(
+                "The source does not establish a sufficiently supported operating geography. "
+                "Choose the study geography manually if your LCA requires one."
+            )
+    else:
+        st.warning("No operating-context proposal is available; choose the study geography manually if needed.")
+
+    study_location_preference = st.text_input(
+        "Study geography preference for ecoinvent matching",
+        key="study_location_preference",
+        help=(
+            "Review/edit the proposed ecoinvent geography for where the foreground system operates. "
+            "This becomes the first geography preference for exchanges that do not have their own more specific geography. "
+            "It never hard-filters Brightway results."
+        ),
+        placeholder="e.g. GB, DE, RER, GLO — leave blank if genuinely unspecified",
+    ).strip()
 
     process_names: list[str] = []
     if extraction.foreground_processes:
@@ -138,7 +219,7 @@ if "extraction" in st.session_state:
             "search_worthy": st.column_config.CheckboxColumn("Search ecoinvent?"),
             "ecoinvent_search_term": st.column_config.TextColumn("Search concept", width="medium"),
             "ecoinvent_activity_type_hint": st.column_config.SelectboxColumn("Activity hint", options=ACTIVITY_TYPES),
-            "geography_hint": st.column_config.TextColumn("Geography hint"),
+            "geography_hint": st.column_config.TextColumn("Exchange geography"),
             "supplier_technology_hint": st.column_config.TextColumn("Supplier technology"),
             "interpretation_reason": st.column_config.TextColumn("Why", width="large"),
             "source_document": st.column_config.TextColumn("Source", disabled=True),
@@ -163,8 +244,14 @@ if "extraction" in st.session_state:
         progress = st.progress(0.0)
         for n, (_, row) in enumerate(searchable.iterrows(), start=1):
             flow_id = int(row.get("flow_id", n - 1))
-            geography = str(row.get("geography_hint") or "").strip()
-            locations = list(dict.fromkeys(([geography] if geography else []) + default_locations))
+            exchange_geography = str(row.get("geography_hint") or "").strip()
+            locations = list(
+                dict.fromkeys(
+                    ([exchange_geography] if exchange_geography else [])
+                    + ([study_location_preference] if study_location_preference else [])
+                    + default_locations
+                )
+            )
             try:
                 candidate_map[flow_id] = search_candidates(
                     project_name=project_name,
@@ -185,6 +272,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
     st.subheader("5. Review real ecoinvent candidates")
     inv_df = st.session_state["inventory_df"]
     mapping_rows = []
+    study_location_preference = str(st.session_state.get("study_location_preference") or "").strip()
 
     for flow_id, candidates in st.session_state["candidates"].items():
         matching = inv_df[inv_df["flow_id"] == flow_id]
@@ -197,12 +285,20 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
 
         manual_query = st.text_input("Manual Brightway search", value=str(row.get("ecoinvent_search_term") or flow_name), key=f"manual_query_{flow_id}")
         if st.button("Run manual search", key=f"manual_search_{flow_id}"):
-            locations = [str(row.get("geography_hint") or "").strip()] + [x.strip() for x in locations_text.split(",") if x.strip()]
+            exchange_geography = str(row.get("geography_hint") or "").strip()
+            fallback_locations = [x.strip() for x in locations_text.split(",") if x.strip()]
+            locations = list(
+                dict.fromkeys(
+                    ([exchange_geography] if exchange_geography else [])
+                    + ([study_location_preference] if study_location_preference else [])
+                    + fallback_locations
+                )
+            )
             st.session_state["candidates"][flow_id] = search_candidates(
                 project_name=project_name,
                 database_name=database_name,
                 query=manual_query,
-                locations=[x for x in locations if x],
+                locations=locations,
                 limit=candidate_limit,
                 unit=str(row.get("unit") or "").strip() or None,
             )
@@ -223,7 +319,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
         choice = st.selectbox("Approve mapping", ["— no selection —"] + labels, key=f"mapping_{flow_id}")
         if choice != "— no selection —":
             chosen = candidates[labels.index(choice)]
-            mapping_rows.append({"flow_id": flow_id, "parent_process": parent, "flow_name": flow_name, "search_concept": row.get("ecoinvent_search_term"), **chosen})
+            mapping_rows.append({"flow_id": flow_id, "parent_process": parent, "flow_name": flow_name, "search_concept": row.get("ecoinvent_search_term"), "study_geography": study_location_preference, **chosen})
 
     if mapping_rows:
         mapping_df = pd.DataFrame(mapping_rows)
