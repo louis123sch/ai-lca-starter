@@ -1,101 +1,27 @@
-# AI-LCA Starter
+# AI-LCA Foreground Builder — starter prototype
 
-A first local prototype for:
+This repository is a first working prototype for a human-in-the-loop AI-assisted LCA workflow built around Brightway.
 
-**paste text / upload PDF → AI-proposed foreground inventory → human review → Brightway/ecoinvent candidate search → human-approved mapping**
-
-The architectural rule is:
+The design principle is:
 
 > **AI proposes → deterministic validation → human approves → Brightway calculates.**
 
-This prototype deliberately **does not** let the LLM calculate LCIA or fabricate ecoinvent datasets.
+The current prototype supports:
 
-## What works in v0.1
+1. Paste technical text or drag and drop multiple source documents.
+2. Read machine-readable PDF (`.pdf`) and Word (`.docx`) files locally.
+3. Preserve source filename provenance, PDF page markers, and Word table markers.
+4. Use an OpenAI model with Structured Outputs to extract and classify LCA-relevant information.
+5. Review/edit the proposed information in a Streamlit table.
+6. Separate technosphere flows from biosphere flows, model parameters, and reference products.
+7. Search a local Brightway/ecoinvent database only for approved technosphere flows.
+8. Manually approve a real ecoinvent candidate and export the reviewed mappings.
 
-- Paste technical text into a local Streamlit interface.
-- Upload a text-readable PDF; text is extracted locally with page markers.
-- Send that source text to the OpenAI API using Pydantic-backed Structured Outputs.
-- Extract foreground flows with amount, unit, basis, stage/component, page and evidence text.
-- Review and edit the proposed inventory in the browser.
-- Search a real database already installed in your Brightway 2.5 project.
-- Review candidate ecoinvent activities including database, activity ID/code, reference product, location and unit.
-- Manually approve a background mapping.
-- Export the reviewed inventory and approved mappings.
+## Important boundary
 
-## Deliberately not in v0.1
+The prototype **does not yet write the approved inventory into a persistent Brightway foreground database or run LCIA automatically**. The next intended milestone is an explicit foreground-database builder after extraction and background-process matching have been validated.
 
-- OCR for scanned/image-only PDFs.
-- LLM ranking of ecoinvent candidates.
-- Unit conversion between foreground and candidate datasets.
-- Automatic construction of the persistent Brightway foreground database.
-- LCIA, Monte Carlo, scenario APIs or dynamic electricity.
-
-Those should be added after the extraction and matching steps are tested against known LCA inventories.
-
-## Recommended setup on your Mac / VS Code
-
-Use your **existing working Brightway 2.5 environment** rather than creating another Brightway installation unnecessarily.
-
-Open a terminal in VS Code and activate the environment you already use for Brightway. Then, from this project directory:
-
-```bash
-python -m pip install -e .
-```
-
-If Streamlit or the other dependencies are missing, the command above installs them into that environment. The project only directly imports `bw2data`; your existing Brightway environment can retain its current solver setup.
-
-For Apple Silicon, Brightway's current installation documentation recommends the `brightway25` stack with `scikit-umfpack` rather than `pypardiso`.
-
-## Configure the API key
-
-Copy the example environment file:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```text
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-5-mini
-BRIGHTWAY_PROJECT=the_exact_name_of_your_existing_project
-```
-
-Do not commit `.env` to GitHub.
-
-Alternatively, export the key from your shell:
-
-```bash
-export OPENAI_API_KEY="your_key_here"
-```
-
-## Run the app
-
-```bash
-streamlit run app.py
-```
-
-Streamlit will print a local URL, normally `http://localhost:8501`, and usually opens it automatically.
-
-## Workflow
-
-1. Paste source text **or** upload a text-readable PDF.
-2. Add study instructions if useful, e.g. `Focus on cradle-to-gate inputs for 1 kg H2; keep infrastructure separate from operation.`
-3. Click **Extract proposed inventory**.
-4. Inspect the value, unit, basis and especially the **evidence** field for every row.
-5. Edit/remove/add rows as required.
-6. Enter/select the Brightway project and ecoinvent database in the sidebar.
-7. Click **Search ecoinvent candidates**.
-8. Review the real candidates returned from your local database.
-9. Select a mapping only when you agree with it.
-10. Export the reviewed inventory and mappings.
-
-## Why PDF text is extracted locally first
-
-For this first research prototype, local extraction makes provenance easy to inspect. Each page is converted to text with a marker such as `[PAGE 8]`, and the model must return evidence for each proposed flow. That makes it much easier to test extraction accuracy against the original source.
-
-Scanned PDFs, complicated figures and some tables need a multimodal PDF path later. Do not silently OCR or infer values in the first benchmark version.
+Scanned/image-only PDFs are also not OCR'd in this version.
 
 ## Project structure
 
@@ -103,19 +29,81 @@ Scanned PDFs, complicated figures and some tables need a multimodal PDF path lat
 ai-lca-starter/
 ├── app.py
 ├── src/ai_lca/
-│   ├── models.py             # strict foreground schema
-│   ├── documents.py          # local PDF text extraction
-│   ├── llm.py                # structured LLM extraction
-│   ├── brightway_search.py   # real Brightway candidate retrieval
+│   ├── models.py
+│   ├── documents.py
+│   ├── llm.py
+│   ├── brightway_search.py
 │   └── export.py
 ├── notebooks/
-│   └── 01_document_to_inventory.ipynb
 ├── tests/
 ├── data/
 ├── .env.example
-└── pyproject.toml
+├── pyproject.toml
+└── README.md
 ```
 
-## Next development step
+## Installation
 
-The next version should add an explicit **candidate-ranking layer** which scores lexical/semantic similarity, unit, reference product, geography and activity type, while still requiring user approval. After that, approved mappings can be written into a persistent Brightway foreground database.
+Use the same Python environment in which your Brightway installation already works.
+
+```bash
+python -m pip install -e .
+```
+
+The editable install is useful during development. Re-run the command whenever `pyproject.toml` gains a new dependency.
+
+Create a local `.env` file from `.env.example`:
+
+```text
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-5-mini
+BRIGHTWAY_PROJECT=your_existing_project
+```
+
+Never commit `.env` or API keys to GitHub.
+
+## Run the interface
+
+```bash
+streamlit run app.py
+```
+
+Streamlit opens a local browser interface, normally at `http://localhost:8501`.
+
+### Document input
+
+The **Upload documents** tab accepts several files at once and acts as a drag-and-drop zone.
+
+Supported formats in this version:
+
+- `.pdf` — machine-readable PDFs, with page markers retained
+- `.docx` — Word paragraphs and tables
+
+Pasted text and uploaded documents can be analysed together. Each extracted item can retain:
+
+- source document
+- PDF page where available
+- Word/PDF table marker where available
+- evidence snippet
+
+## Classification and routing
+
+Every extracted item is proposed as one of:
+
+- `technosphere_flow` — materials, energy, fuels, transport, services, infrastructure inputs; eligible for ecoinvent candidate search
+- `biosphere_flow` — direct elementary emissions/resources; retained for later biosphere matching
+- `parameter` — plant lifetime, operating hours, capacity, efficiency, yield, load factor, etc.; retained but never sent to ecoinvent search
+- `reference_product` — foreground output/product information
+
+The item type is visible and editable before candidate search.
+
+## Current development direction
+
+Planned milestones include:
+
+1. Better hybrid ecoinvent retrieval and ranking.
+2. AI ranking/explanation of real candidates with human approval.
+3. Persistent Brightway foreground-database construction.
+4. Parameter handling and scenario generation.
+5. Dynamic/API-driven inputs.
+6. Uncertainty and provenance-aware validation.
