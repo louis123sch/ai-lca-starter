@@ -72,7 +72,7 @@ Streamlit opens a local browser interface, normally at `http://localhost:8501`.
 
 ### Document input
 
-The **Upload documents** tab accepts several files at once and acts as a drag-and-drop zone.
+The **Upload documents** tab accepts several files at once. Streamlit's file uploader is itself the drag-and-drop zone, so files can be dragged directly from Finder onto that area or selected through the file picker.
 
 Supported formats in this version:
 
