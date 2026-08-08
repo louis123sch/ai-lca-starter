@@ -85,3 +85,29 @@ def test_generic_steel_can_keep_an_explicit_generic_steel_mapping():
 
     result = validate_inventory_against_process_map(extraction, process_map, "")
     assert result.flows[0].ecoinvent_activity_hint == "Market for steel"
+
+
+def test_context_suffix_is_not_part_of_search_concept():
+    process_map = _process_map()
+    extraction = InventoryExtraction(
+        source_summary="test",
+        flows=[
+            InventoryFlow(
+                process_id="p001",
+                technology_group="SMR",
+                process_name="Steam methane reforming",
+                name="concrete (plant construction)",
+                amount=6.6e-6,
+                unit="m3",
+                direction="input",
+                flow_kind="material",
+                evidence=[SourceEvidence(table="Table 2", evidence_text="Concrete m3 6.60e-06")],
+            )
+        ],
+    )
+
+    result = validate_inventory_against_process_map(extraction, process_map, "")
+    flow = result.flows[0]
+    assert flow.name == "concrete"
+    assert flow.ecoinvent_search_term == "concrete"
+    assert "plant construction" in (flow.component_or_stage or "")
