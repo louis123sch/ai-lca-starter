@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import re
 
-def _normalise(value: str | None) -> str:
+
+def _normalise_text(value: str | None) -> str:
     return " ".join((value or "").split()).casefold()
+
+
+def _normalise_dataset_name(value: str | None) -> str:
+    """Ignore case, punctuation, and cosmetic spacing in activity names."""
+    return "".join(re.findall(r"[a-z0-9]+", (value or "").casefold()))
 
 
 def recommended_candidate_index(
@@ -23,15 +30,15 @@ def recommended_candidate_index(
     if not usable:
         return None, "No candidate is available for automatic selection."
 
-    relation = _normalise(mapping_relation)
-    source_hint = _normalise(source_activity_hint)
+    relation = _normalise_text(mapping_relation)
+    source_hint = _normalise_dataset_name(source_activity_hint)
 
     if relation == "uncertain":
         return None, "The source mapping is marked uncertain, so it requires manual approval."
 
     if source_hint and relation in {"exact", "proxy"}:
         for index, candidate in enumerate(usable):
-            if _normalise(candidate.get("name")) == source_hint:
+            if _normalise_dataset_name(candidate.get("name")) == source_hint:
                 label = "exact source mapping" if relation == "exact" else "source-supported proxy"
                 return index, f"Preselected because the candidate matches the {label}."
         return None, "The source names a background dataset, but that exact dataset was not returned; review manually."
@@ -40,7 +47,7 @@ def recommended_candidate_index(
     top_score = float(top.get("match_score") or 0)
     second_score = float(usable[1].get("match_score") or 0) if len(usable) > 1 else 0.0
     margin = top_score - second_score
-    reasons = _normalise(top.get("match_reasons"))
+    reasons = _normalise_text(top.get("match_reasons"))
 
     if target == "biosphere":
         strong_name = (
