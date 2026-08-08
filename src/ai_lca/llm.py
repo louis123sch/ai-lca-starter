@@ -1,59 +1,188 @@
 from __future__ import annotations
 
+import json
 import os
 from openai import OpenAI
 
-from .models import InventoryExtraction
+from .models import InventoryExtraction, ProcessMap
+from .validation import normalise_process_ids, validate_inventory_against_process_map
 
 
-SYSTEM_PROMPT = """You are assisting with life-cycle inventory (LCI) construction.
-Your job is extraction, not invention.
+PROCESS_MAP_SYSTEM_PROMPT = """You are assisting with life-cycle assessment (LCA) model reconstruction from an EVIDENCE CORPUS that may contain several uploaded documents.
+Your first job is PROCESS-STRUCTURE DISCOVERY across the corpus, not inventory extraction and not engineering decomposition.
 
-Rules:
-1. Extract only foreground flows supported by the supplied source text.
-2. Never invent an amount, unit, material, process, page, table, or functional unit.
-3. If a flow is mentioned but no amount is given, amount must be null.
-4. Keep construction/capital inputs distinct from operational inputs where the source permits.
-5. Keep outputs/co-products distinct from inputs.
-6. Preserve the stated basis (per kg product, per year, per plant, etc.). Do not silently convert bases.
-7. Include a short evidence_text snippet for every flow.
-8. Use [PAGE N] markers to populate page only when available.
-9. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
-10. The result is a proposal for human review, not an approved LCA model.
+Treat all uploaded documents as one evidence base. A process may be supported jointly by several documents. The main paper, supplementary information, appendices, technical reports, datasheets, and notes are not separate modelling worlds unless the evidence explicitly says they describe different systems or scenarios.
+
+A foreground process means a process that the combined evidence supports as a distinct modelled LCA unit. An engineering operation or physical step is not automatically a separate foreground process.
+
+Strict rules:
+1. Build one coherent process map from ALL supplied documents together.
+2. Merge descriptions from different documents when they refer to the same foreground process. Do not create duplicate processes merely because the same process appears in several files.
+3. Create a foreground process only when the evidence corpus provides direct support that the LCA models it separately.
+4. Good evidence includes a dedicated inventory table, a separate process box in an LCA/system-boundary figure, a separately quantified mass/energy balance, an explicit intermediate linkage between modelled processes, or explicit text clearly defining a separate LCA process.
+5. Do NOT create separate foreground processes merely because the technology description mentions reactor heating, compression, separation, purification, pumping, plasma generation, electricity supply, natural-gas supply, or similar engineering operations.
+6. If the combined evidence represents one inventory for the whole technology/pathway, create ONE foreground process and record internal engineering steps under operations even if those steps are described across several documents.
+7. Group related processes under the technology/pathway they belong to.
+8. Every foreground process must include direct evidence. Add evidence from every relevant document where useful. Populate source_document from the nearest [DOCUMENT ...] marker.
+9. Do not use general engineering knowledge as evidence and do not infer an electricity voltage level, grid market, fuel route, geography, or technology variant unless the corpus supports it.
+10. Capture overall and process-specific geography/time context when supported anywhere in the corpus; otherwise leave null and warn.
+11. If two documents conflict about process structure, quantity basis, geography, or scenario, do not silently choose. Record the conflict in assumptions_or_warnings and keep distinct scenarios separate only when the source evidence explicitly treats them as distinct.
+12. Missing a process is preferable to inventing one.
+13. The result is a proposed process map for human review, not an approved Brightway model.
 """
 
 
-def extract_inventory_from_text(
+INVENTORY_SYSTEM_PROMPT = """You are assisting with life-cycle inventory (LCI) construction from an EVIDENCE CORPUS under an already defined ProcessMap.
+Your job is evidence synthesis and extraction, not invention.
+
+Treat all uploaded documents as one evidence base. A single foreground flow may be supported by several documents. Combine complementary evidence for the same flow instead of duplicating the flow once per document.
+
+A proper foreground inventory can contain three different exchange classes:
+- TECHNOSPHERE: products/services supplied by other activities, e.g. natural gas, electricity, concrete, steel, transport, treatment, equipment.
+- BIOSPHERE: elementary flows crossing directly between the foreground process and the natural environment, e.g. direct CO2/CH4/NOx emissions to air, emissions to water/soil, direct resource extraction, land occupation/transformation.
+- PRODUCTION: the reference product and co-products produced by the foreground process.
+
+Rules:
+1. Extract flows ONLY for the foreground process IDs supplied in the approved process map.
+2. Never create another process or process ID. Described operations are context inside a process, not separate processes.
+3. Build each process inventory from ALL relevant evidence across the document corpus.
+4. If one document gives the process identity and another provides its quantities, combine them when the evidence clearly refers to the same process/scenario.
+5. Do not duplicate a flow because it appears in multiple documents. Return one flow with multiple evidence records.
+6. If documents provide conflicting amounts, units, bases, scenarios, or system boundaries for what appears to be the same flow, do not average or arbitrarily choose. Record the conflict in assumptions_or_warnings; keep separate rows only when the documents clearly define distinct scenarios/bases.
+7. Extract only foreground flows supported by the supplied evidence corpus.
+8. Never invent an amount, unit, material, emission, compartment, voltage level, process, page, table, functional unit, geography, market, material subtype, supplier technology, or database activity.
+9. The `name` field is the CANONICAL BARE EXCHANGE CONCEPT only. Examples: `concrete`, `steel`, `aluminium`, `natural gas`, `electricity`, `steam turbine`, `carbon dioxide`, `methane`. NEVER put lifecycle/modelling context into the name, such as `(plant construction)`, `(plant manufacturing)`, `(capital input)`, `(for electricity recovery)`, or similar qualifiers.
+10. Put lifecycle/component context such as `plant construction`, `plant manufacturing`, `capital equipment`, or `operation` in `component_or_stage`, not in `name`.
+11. Use `source_label` for the concise wording appearing in the quantitative inventory source.
+12. Set `exchange_type = technosphere` for purchased/consumed intermediate products and services that should link to an ecoinvent/background activity.
+13. Set `exchange_type = biosphere` for DIRECT elementary flows crossing the environment boundary. Direct emissions belong here even if the source calls them process emissions. Direct natural-resource uptake also belongs here. Do NOT send biosphere flows to ecoinvent activity matching.
+14. Set `exchange_type = production` for the reference product and co-products. Production exchanges are not sent to background matching.
+15. For biosphere exchanges, use `biosphere_search_term` as the clean elementary-flow concept. Use `biosphere_compartment_hint` only if the source supports the receiving/source compartment or subcompartment. Examples: `air`, `water`, `soil`, `natural resource`, `urban air close to ground`. Do not invent fossil/biogenic status or a subcompartment.
+16. If the source explicitly reports direct CO2, methane, nitrous oxide, nitrogen oxides, sulfur dioxide, particulate matter, VOCs, wastewater pollutants, resource extraction, or land-use elementary flows for the foreground process, INCLUDE them. Do not omit them merely because they are not technosphere inputs.
+17. Do NOT treat LCIA/impact results as biosphere flows. Values reported as `kg CO2-eq`, GWP, global-warming potential, acidification potential, toxicity indicators, endpoint scores, etc. are impact-assessment results, not direct elementary emissions. Only extract the underlying direct emission/resource quantity when the source actually provides it.
+18. A purchased water input (tap water, deionised water, process water supplied by another activity) is technosphere. Direct withdrawal from a river/lake/groundwater/environment is biosphere only when the evidence supports direct resource uptake.
+19. `ecoinvent_search_term` must be a clean bare technosphere search concept, normally the canonical flow name. It must never contain lifecycle-stage text such as plant construction/capital input. Leave it null for biosphere/production exchanges.
+20. Keep FOREGROUND OPERATING GEOGRAPHY separate from EXCHANGE-SPECIFIC SUPPLY PROVENANCE. If a Germany-based process explicitly consumes Norwegian natural gas, the process geography remains Germany while `exchange_geography_hint` for natural gas may be Norway.
+21. Populate `exchange_geography_hint` only when the corpus explicitly supports a geography/provenance for that specific technosphere exchange. Do not copy the process geography into every exchange; the application handles process geography as a fallback.
+22. Populate `supplier_technology_hint` only when the corpus explicitly identifies the supply technology or route for that technosphere exchange, e.g. offshore wind, North Sea natural-gas production, photovoltaic electricity, or a named production route. Keep this out of the canonical exchange name.
+23. Use `interpretation_reason` for a short audit-friendly explanation of why the item is an LCI exchange and, where relevant, why a geography/technology/compartment hint belongs to it. Do not provide private chain-of-thought.
+24. Construction and infrastructure materials/equipment that are actually quantified in the foreground inventory are genuine technosphere inputs. Preserve concrete, steel, aluminium, cast iron, turbines, pipelines, etc. as separate exchanges rather than collapsing them into `plant construction` or `plant manufacturing`.
+25. If another uploaded document provides a database-process table or otherwise identifies the background datasets applied by the study, use that evidence to identify technosphere background mappings. Keep the foreground exchange identity separate from the background dataset identity.
+26. For a direct product-to-dataset correspondence, set `background_mapping_relation = exact`. Populate `ecoinvent_activity_hint`, `ecoinvent_location_hint`, and `background_mapping_evidence`.
+27. A study may intentionally use a different database activity as a PROXY for a foreground item. When the combined corpus strongly supports that interpretation, keep the foreground `name` unchanged, set `background_mapping_relation = proxy`, populate the source-supported activity/location, and explain the inference in `background_mapping_rationale`.
+28. Do not infer a proxy merely because two names are vaguely similar. Proxy status needs structural evidence from the study: for example, the foreground inventory contains an item, the supplementary explicitly lists the background datasets applied in the study, and the listed dataset is the only credible dataset corresponding to that foreground item. If the relationship is plausible but not sufficiently resolved, use `background_mapping_relation = uncertain` or leave the activity hint null.
+29. An explicit database table may complement a quantitative inventory in another document. Example: if the LCI table gives `Concrete 6.6e-6 m3` and a supplementary database table explicitly gives `Concrete -> Market for concrete, normal -> RoW`, keep the amount from the LCI evidence and attach the database activity as an exact background mapping.
+30. Do NOT infer a specific material subtype when the quantitative flow is generic and the corpus provides several possible database products. Example: if the LCI says only `Steel` but a supplementary table lists high-alloyed, low-alloyed and unalloyed steel, keep the flow/search term as `steel`; the mapping remains unresolved unless other evidence identifies which dataset was used.
+31. If the evidence says only `electricity`, the canonical foreground flow name must remain `electricity`. Do not turn it into low-, medium-, or high-voltage electricity unless the evidence for the foreground quantity itself supports that specificity. A separate background-process table may still identify the source-used electricity dataset without changing the foreground name.
+32. A technical operation is not itself an exchange. Only extract material/energy/transport/output/emission/resource flows actually stated or clearly tabulated for the modelled process.
+33. If a flow is mentioned but no amount is given, amount must be null.
+34. Keep construction/capital inputs distinct from operational inputs through `component_or_stage` while retaining each actual material/equipment exchange separately.
+35. Keep outputs/co-products distinct from inputs and direct emissions distinct from products.
+36. Preserve the stated basis. Do not silently convert bases.
+37. Include evidence records for each flow and for each source-supported technosphere mapping. Populate source_document from [DOCUMENT ...] markers and page/table/section where available.
+38. The result is a proposal for human review, not an approved LCA model.
+"""
+
+
+def _client(api_key: str | None = None) -> OpenAI:
+    return OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+
+
+def _chosen_model(model: str | None = None) -> str:
+    return model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
+
+
+def extract_process_map_from_text(
     text: str,
     *,
     model: str | None = None,
     api_key: str | None = None,
     extra_instructions: str = "",
-) -> InventoryExtraction:
-    """Extract an auditable proposed inventory using OpenAI Structured Outputs.
-
-    The OpenAI Python SDK's Pydantic parser converts the model output directly into
-    ``InventoryExtraction`` and raises if the result does not satisfy the schema.
-    """
+) -> ProcessMap:
+    """Discover one evidence-backed foreground-process hierarchy across the full corpus."""
     text = (text or "").strip()
     if not text:
         raise ValueError("No source text supplied")
 
-    client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
-    chosen_model = model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
-
     user_prompt = (
-        "Extract the foreground LCI information from the source below. "
-        "Treat values as unapproved until human review.\n\n"
+        "Reconstruct one coherent foreground process structure from the complete evidence corpus below. "
+        "Use evidence across documents jointly, merge repeated descriptions of the same modelled process, and separate actual foreground processes from engineering operations described inside them.\n\n"
     )
     if extra_instructions.strip():
         user_prompt += f"Study-specific instructions:\n{extra_instructions.strip()}\n\n"
-    user_prompt += f"SOURCE MATERIAL:\n{text}"
+    user_prompt += f"EVIDENCE CORPUS:\n{text}"
 
-    completion = client.beta.chat.completions.parse(
-        model=chosen_model,
+    completion = _client(api_key).beta.chat.completions.parse(
+        model=_chosen_model(model),
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": PROCESS_MAP_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format=ProcessMap,
+    )
+
+    message = completion.choices[0].message
+    if getattr(message, "refusal", None):
+        raise RuntimeError(f"Model refused process-map extraction: {message.refusal}")
+    if message.parsed is None:
+        raise RuntimeError("The model returned no parsed process map")
+
+    return normalise_process_ids(message.parsed)
+
+
+def extract_inventory_from_text(
+    text: str,
+    *,
+    process_map: ProcessMap,
+    approved_process_ids: list[str] | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    extra_instructions: str = "",
+) -> InventoryExtraction:
+    """Extract one auditable inventory across all evidence, constrained to approved processes."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("No source text supplied")
+
+    approved = set(approved_process_ids) if approved_process_ids is not None else None
+    selected_groups = []
+    selected_ids: set[str] = set()
+    for group in process_map.technology_groups:
+        processes = [
+            process.model_dump()
+            for process in group.processes
+            if approved is None or process.process_id in approved
+        ]
+        if processes:
+            selected_groups.append({"name": group.name, "processes": processes})
+            selected_ids.update(process["process_id"] for process in processes)
+
+    if not selected_groups:
+        raise ValueError("No foreground processes are selected for inventory extraction")
+
+    approved_payload = {
+        "functional_unit": process_map.functional_unit,
+        "system_boundary": process_map.system_boundary,
+        "geographic_context": process_map.geographic_context,
+        "temporal_context": process_map.temporal_context,
+        "technology_groups": selected_groups,
+    }
+
+    user_prompt = (
+        "Build the complete foreground inventory for ONLY the approved foreground processes below using the entire evidence corpus. "
+        "Include technosphere inputs, production outputs/co-products, and source-supported direct biosphere emissions/resources. "
+        "Do not confuse LCIA indicators such as kg CO2-eq with direct emissions. "
+        "Combine complementary evidence across documents into the same process and flow. Extract actual material/equipment exchanges separately, keep lifecycle-stage context out of exchange/search names, preserve exchange-specific supply provenance separately from process geography, and distinguish exact source mappings from intentional proxy datasets.\n\n"
+        f"APPROVED PROCESS MAP:\n{json.dumps(approved_payload, indent=2, ensure_ascii=False)}\n\n"
+    )
+    if extra_instructions.strip():
+        user_prompt += f"Study-specific instructions:\n{extra_instructions.strip()}\n\n"
+    user_prompt += f"EVIDENCE CORPUS:\n{text}"
+
+    completion = _client(api_key).beta.chat.completions.parse(
+        model=_chosen_model(model),
+        messages=[
+            {"role": "system", "content": INVENTORY_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
         response_format=InventoryExtraction,
@@ -61,8 +190,13 @@ def extract_inventory_from_text(
 
     message = completion.choices[0].message
     if getattr(message, "refusal", None):
-        raise RuntimeError(f"Model refused extraction: {message.refusal}")
+        raise RuntimeError(f"Model refused inventory extraction: {message.refusal}")
     if message.parsed is None:
         raise RuntimeError("The model returned no parsed structured inventory")
 
-    return message.parsed
+    return validate_inventory_against_process_map(
+        message.parsed,
+        process_map,
+        text,
+        allowed_process_ids=selected_ids,
+    )

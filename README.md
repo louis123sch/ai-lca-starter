@@ -1,121 +1,94 @@
 # AI-LCA Starter
 
-A first local prototype for:
-
-**paste text / upload PDF → AI-proposed foreground inventory → human review → Brightway/ecoinvent candidate search → human-approved mapping**
-
-The architectural rule is:
+A human-in-the-loop prototype for reconstructing foreground LCA models from papers, supplementary information, Word documents, and technical evidence.
 
 > **AI proposes → deterministic validation → human approves → Brightway calculates.**
 
-This prototype deliberately **does not** let the LLM calculate LCIA or fabricate ecoinvent datasets.
+## Current workflow
 
-## What works in v0.1
+1. Upload multiple text-readable PDFs and/or modern Word (`.docx`) documents, optionally with pasted text.
+2. Treat all supplied material as **one provenance-tagged evidence corpus**.
+3. AI reconstructs the paper-supported foreground process map.
+4. Human reviews which proposed foreground processes are genuine modelled processes.
+5. AI extracts a complete foreground inventory across all approved processes.
+6. Exchanges are classified as:
+   - **technosphere** — products/services supplied by background activities;
+   - **biosphere** — direct elementary emissions/resources crossing the environment boundary;
+   - **production** — reference products and co-products.
+7. Human reviews names, quantities, exchange class, stage, evidence, and search concepts.
+8. Technosphere exchanges are matched against the selected ecoinvent/background database.
+9. Biosphere exchanges are matched against the installed Brightway biosphere database (normally `biosphere3`).
+10. Candidate mappings remain human-approved before later Brightway foreground writing/calculation.
 
-- Paste technical text into a local Streamlit interface.
-- Upload a text-readable PDF; text is extracted locally with page markers.
-- Send that source text to the OpenAI API using Pydantic-backed Structured Outputs.
-- Extract foreground flows with amount, unit, basis, stage/component, page and evidence text.
-- Review and edit the proposed inventory in the browser.
-- Search a real database already installed in your Brightway 2.5 project.
-- Review candidate ecoinvent activities including database, activity ID/code, reference product, location and unit.
-- Manually approve a background mapping.
-- Export the reviewed inventory and approved mappings.
+## Important modelling behaviour
 
-## Deliberately not in v0.1
+- Uploaded files contribute jointly to the same foreground processes and exchanges. The paper and supplement are not treated as separate LCAs.
+- PDF page markers and Word paragraphs/tables are retained; Word tables remain in their original document order.
+- Engineering operations are not automatically turned into separate foreground activities.
+- Lifecycle context such as `plant construction` is stored separately from canonical exchange/search names.
+- Explicit construction materials/equipment such as concrete, steel, aluminium, cast iron and turbines remain separate exchanges.
+- Direct process emissions and direct resource uptake are retained as **biosphere exchanges** instead of being discarded because they are not ecoinvent technosphere inputs.
+- LCIA results such as `kg CO2-eq` are **not** elementary-flow emissions. A deterministic guard drops indicator-like rows that the AI might otherwise misread as biosphere flows.
+- Purchased water is technosphere; direct environmental water withdrawal is biosphere only when the source supports that interpretation.
+- Source-provided technosphere mappings can be represented as **exact**, **proxy**, or **uncertain** without renaming the foreground exchange.
+- Cross-document mapping tables are used as evidence. A source-applied gas-turbine dataset can therefore be retained as a labelled proxy for a foreground steam-turbine item while the foreground identity remains `steam turbine`.
+- Generic materials do not inherit unsupported specific subtypes. Generic `steel`, for example, stays unresolved when several incompatible steel datasets are plausible.
+- Exchange-specific supply provenance is kept separate from foreground operating geography.
+- Candidate ranking uses product/activity similarity, unit, evidence-derived geography, activity type, and source-derived supplier/technology hints.
+- Search controls are editable without modifying the evidence-backed foreground inventory.
+- Automatic approval is conservative: source-backed exact/proxy mappings can be preselected; search-only candidates are preselected only when the match is strong and clearly separated from alternatives. Ambiguous results default to **no selection**.
 
-- OCR for scanned/image-only PDFs.
-- LLM ranking of ecoinvent candidates.
-- Unit conversion between foreground and candidate datasets.
-- Automatic construction of the persistent Brightway foreground database.
-- LCIA, Monte Carlo, scenario APIs or dynamic electricity.
+## Install
 
-Those should be added after the extraction and matching steps are tested against known LCA inventories.
-
-## Recommended setup on your Mac / VS Code
-
-Use your **existing working Brightway 2.5 environment** rather than creating another Brightway installation unnecessarily.
-
-Open a terminal in VS Code and activate the environment you already use for Brightway. Then, from this project directory:
+Use the Brightway environment you already work in:
 
 ```bash
 python -m pip install -e .
 ```
 
-If Streamlit or the other dependencies are missing, the command above installs them into that environment. The project only directly imports `bw2data`; your existing Brightway environment can retain its current solver setup.
-
-For Apple Silicon, Brightway's current installation documentation recommends the `brightway25` stack with `scikit-umfpack` rather than `pypardiso`.
-
-## Configure the API key
-
-Copy the example environment file:
+For tests:
 
 ```bash
-cp .env.example .env
+python -m pip install -e '.[test]'
+python -m pytest
 ```
 
-Edit `.env`:
+The branch also includes a GitHub Actions pytest workflow so pushes/PR updates are checked automatically.
 
-```text
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-5-mini
-BRIGHTWAY_PROJECT=the_exact_name_of_your_existing_project
-```
-
-Do not commit `.env` to GitHub.
-
-Alternatively, export the key from your shell:
-
-```bash
-export OPENAI_API_KEY="your_key_here"
-```
-
-## Run the app
+Run the app:
 
 ```bash
 streamlit run app.py
 ```
 
-Streamlit will print a local URL, normally `http://localhost:8501`, and usually opens it automatically.
+## Configuration
 
-## Workflow
-
-1. Paste source text **or** upload a text-readable PDF.
-2. Add study instructions if useful, e.g. `Focus on cradle-to-gate inputs for 1 kg H2; keep infrastructure separate from operation.`
-3. Click **Extract proposed inventory**.
-4. Inspect the value, unit, basis and especially the **evidence** field for every row.
-5. Edit/remove/add rows as required.
-6. Enter/select the Brightway project and ecoinvent database in the sidebar.
-7. Click **Search ecoinvent candidates**.
-8. Review the real candidates returned from your local database.
-9. Select a mapping only when you agree with it.
-10. Export the reviewed inventory and mappings.
-
-## Why PDF text is extracted locally first
-
-For this first research prototype, local extraction makes provenance easy to inspect. Each page is converted to text with a marker such as `[PAGE 8]`, and the model must return evidence for each proposed flow. That makes it much easier to test extraction accuracy against the original source.
-
-Scanned PDFs, complicated figures and some tables need a multimodal PDF path later. Do not silently OCR or infer values in the first benchmark version.
-
-## Project structure
+Copy `.env.example` to `.env` and provide your API key/project name, or export the environment variables from your shell.
 
 ```text
-ai-lca-starter/
-├── app.py
-├── src/ai_lca/
-│   ├── models.py             # strict foreground schema
-│   ├── documents.py          # local PDF text extraction
-│   ├── llm.py                # structured LLM extraction
-│   ├── brightway_search.py   # real Brightway candidate retrieval
-│   └── export.py
-├── notebooks/
-│   └── 01_document_to_inventory.ipynb
-├── tests/
-├── data/
-├── .env.example
-└── pyproject.toml
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-5-mini
+BRIGHTWAY_PROJECT=your_existing_brightway_project
 ```
 
-## Next development step
+Do not commit `.env`.
 
-The next version should add an explicit **candidate-ranking layer** which scores lexical/semantic similarity, unit, reference product, geography and activity type, while still requiring user approval. After that, approved mappings can be written into a persistent Brightway foreground database.
+## Review and matching
+
+The inventory table lets the reviewer correct the exchange class before matching. Matching eligibility is recalculated from the reviewed row:
+
+- quantified **technosphere input** → technosphere/eecoinvent matching;
+- quantified **biosphere exchange** → biosphere-flow matching;
+- production output, unquantified mention, or unresolved item → no automatic background matching.
+
+Technosphere candidate search remains per-flow and editable. Biosphere exchanges have a separate elementary-flow search query and optional compartment hint. Approved mappings can be downloaded as a combined Brightway mapping file plus separate technosphere and biosphere CSVs.
+
+## Deliberately not included yet
+
+- OCR/multimodal interpretation for scanned or image-only PDFs;
+- legacy `.doc` ingestion;
+- automatic unit conversion;
+- persistent Brightway foreground database writing;
+- LCIA/Monte Carlo/scenario execution in the app.
+
+Those steps should build on the reviewed process map and approved technosphere/biosphere mappings rather than bypassing them.
