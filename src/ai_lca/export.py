@@ -83,6 +83,8 @@ def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
                 "ecoinvent_search_term": flow.ecoinvent_search_term or flow.name,
                 "ecoinvent_activity_hint": flow.ecoinvent_activity_hint,
                 "ecoinvent_location_hint": flow.ecoinvent_location_hint,
+                "background_mapping_relation": flow.background_mapping_relation,
+                "background_mapping_rationale": flow.background_mapping_rationale,
                 "source_documents": documents,
                 "pages": pages,
                 "tables": tables,
