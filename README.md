@@ -28,6 +28,7 @@ A human-in-the-loop prototype for reconstructing foreground LCA models from pape
 - Lifecycle context such as `plant construction` is stored separately from canonical exchange/search names.
 - Explicit construction materials/equipment such as concrete, steel, aluminium, cast iron and turbines remain separate exchanges.
 - Direct process emissions and direct resource uptake are retained as **biosphere exchanges** instead of being discarded because they are not ecoinvent technosphere inputs.
+- LCIA results such as `kg CO2-eq` are **not** elementary-flow emissions. A deterministic guard drops indicator-like rows that the AI might otherwise misread as biosphere flows.
 - Purchased water is technosphere; direct environmental water withdrawal is biosphere only when the source supports that interpretation.
 - Source-provided technosphere mappings can be represented as **exact**, **proxy**, or **uncertain** without renaming the foreground exchange.
 - Cross-document mapping tables are used as evidence. A source-applied gas-turbine dataset can therefore be retained as a labelled proxy for a foreground steam-turbine item while the foreground identity remains `steam turbine`.
