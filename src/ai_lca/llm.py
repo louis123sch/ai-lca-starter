@@ -110,16 +110,18 @@ def extract_inventory_from_text(
     if not text:
         raise ValueError("No source text supplied")
 
-    approved = set(approved_process_ids or [])
+    approved = set(approved_process_ids) if approved_process_ids is not None else None
     selected_groups = []
+    selected_ids: set[str] = set()
     for group in process_map.technology_groups:
         processes = [
             process.model_dump()
             for process in group.processes
-            if not approved or process.process_id in approved
+            if approved is None or process.process_id in approved
         ]
         if processes:
             selected_groups.append({"name": group.name, "processes": processes})
+            selected_ids.update(process["process_id"] for process in processes)
 
     if not selected_groups:
         raise ValueError("No foreground processes are selected for inventory extraction")
@@ -156,4 +158,9 @@ def extract_inventory_from_text(
     if message.parsed is None:
         raise RuntimeError("The model returned no parsed structured inventory")
 
-    return validate_inventory_against_process_map(message.parsed, process_map, text)
+    return validate_inventory_against_process_map(
+        message.parsed,
+        process_map,
+        text,
+        allowed_process_ids=selected_ids,
+    )
