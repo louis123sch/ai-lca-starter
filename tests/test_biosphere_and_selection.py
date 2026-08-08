@@ -151,6 +151,24 @@ def test_source_exact_mapping_preselects_named_candidate_even_if_not_first():
     assert "exact source mapping" in reason.lower()
 
 
+def test_source_proxy_mapping_ignores_cosmetic_spacing():
+    candidates = [
+        {
+            "name": "market for gas turbine, 10 MW electrical",
+            "match_score": 82.0,
+            "match_reasons": "activity name contains query",
+        }
+    ]
+    index, reason = recommended_candidate_index(
+        candidates,
+        source_activity_hint="Market for gas turbine, 10MW electrical",
+        mapping_relation="proxy",
+        target="technosphere",
+    )
+    assert index == 0
+    assert "proxy" in reason.lower()
+
+
 def test_uncertain_source_mapping_is_never_auto_approved():
     candidates = [
         {
