@@ -149,3 +149,45 @@ def test_steam_turbine_can_use_gas_turbine_as_proxy_without_renaming_foreground(
     assert flow.ecoinvent_location_hint == "GLO"
     assert flow.background_mapping_relation == "proxy"
     assert "proxy" in (flow.background_mapping_rationale or "").lower()
+
+
+def test_duplicate_flow_keeps_source_derived_provenance_and_supplier_hint():
+    process_map = _process_map()
+    extraction = InventoryExtraction(
+        source_summary="combined evidence",
+        flows=[
+            InventoryFlow(
+                process_id="p001",
+                technology_group="SMR",
+                process_name="Steam methane reforming",
+                name="electricity",
+                amount=1.0,
+                unit="kWh",
+                direction="input",
+                flow_kind="energy",
+                supplier_technology_hint="offshore wind",
+                interpretation_reason="Electricity is a consumed energy input.",
+                evidence=[SourceEvidence(source_document="paper.pdf", evidence_text="Electricity 1 kWh")],
+            ),
+            InventoryFlow(
+                process_id="p001",
+                technology_group="SMR",
+                process_name="Steam methane reforming",
+                name="electricity",
+                amount=1.0,
+                unit="kWh",
+                direction="input",
+                flow_kind="energy",
+                exchange_geography_hint="Norway",
+                evidence=[SourceEvidence(source_document="supplement.docx", evidence_text="Electricity supplied from Norway")],
+            ),
+        ],
+    )
+
+    result = validate_inventory_against_process_map(extraction, process_map, "")
+    assert len(result.flows) == 1
+    flow = result.flows[0]
+    assert flow.exchange_geography_hint == "Norway"
+    assert flow.supplier_technology_hint == "offshore wind"
+    assert "consumed energy input" in (flow.interpretation_reason or "")
+    assert len(flow.evidence) == 2
