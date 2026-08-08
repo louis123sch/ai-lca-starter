@@ -260,17 +260,13 @@ def validate_inventory_against_process_map(
                     f"Removed over-specific steel mapping hint '{rejected_hint}' because the quantitative foreground evidence identifies only generic steel and no proxy relationship was supported."
                 )
 
-        # Different foreground/background equipment identities can be legitimate proxies.
-        # Preserve the foreground identity and label the mapping relationship instead of rejecting it.
         if flow.ecoinvent_activity_hint and "steam turbine" in _normalise_name(flow.name):
             if "gas turbine" in flow.ecoinvent_activity_hint.casefold():
                 if flow.background_mapping_relation != "proxy":
                     flow.background_mapping_relation = "proxy"
-                    warning = (
-                        "Treated the source-supported gas-turbine background activity as a proxy for the foreground steam turbine; "
-                        "the foreground exchange remains 'steam turbine'."
+                    warnings.append(
+                        "Treated the source-supported gas-turbine background activity as a proxy for the foreground steam turbine; the foreground exchange remains 'steam turbine'."
                     )
-                    warnings.append(warning)
                 if not flow.background_mapping_rationale:
                     flow.background_mapping_rationale = (
                         "Foreground evidence identifies a steam turbine while the source's applied background-data list identifies a gas-turbine activity; this is represented as a proxy rather than an exact identity."
@@ -294,6 +290,31 @@ def validate_inventory_against_process_map(
                 existing.component_or_stage = flow.component_or_stage
             if not existing.source_label and flow.source_label:
                 existing.source_label = flow.source_label
+
+            for field_name, label in (
+                ("exchange_geography_hint", "exchange geography"),
+                ("supplier_technology_hint", "supplier/technology"),
+            ):
+                existing_value = getattr(existing, field_name)
+                incoming_value = getattr(flow, field_name)
+                if not existing_value and incoming_value:
+                    setattr(existing, field_name, incoming_value)
+                elif existing_value and incoming_value and _normalise_name(existing_value) != _normalise_name(incoming_value):
+                    warnings.append(
+                        f"Conflicting {label} hints for repeated flow '{flow.name}': '{existing_value}' versus '{incoming_value}'. Kept the first for review."
+                    )
+
+            if not existing.interpretation_reason and flow.interpretation_reason:
+                existing.interpretation_reason = flow.interpretation_reason
+            elif (
+                existing.interpretation_reason
+                and flow.interpretation_reason
+                and flow.interpretation_reason not in existing.interpretation_reason
+            ):
+                existing.interpretation_reason = (
+                    f"{existing.interpretation_reason} {flow.interpretation_reason}"
+                ).strip()
+
             if not existing.ecoinvent_activity_hint and flow.ecoinvent_activity_hint:
                 existing.ecoinvent_activity_hint = flow.ecoinvent_activity_hint
                 existing.ecoinvent_location_hint = flow.ecoinvent_location_hint
