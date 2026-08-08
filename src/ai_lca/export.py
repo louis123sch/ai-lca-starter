@@ -5,11 +5,35 @@ import pandas as pd
 from .models import InventoryExtraction, ProcessMap
 
 
+def _evidence_summary(evidence_list) -> tuple[str, str, str, str]:
+    documents = []
+    pages = []
+    tables = []
+    snippets = []
+    for evidence in evidence_list or []:
+        if evidence.source_document and evidence.source_document not in documents:
+            documents.append(evidence.source_document)
+        if evidence.page is not None:
+            page_text = str(evidence.page)
+            if page_text not in pages:
+                pages.append(page_text)
+        if evidence.table and evidence.table not in tables:
+            tables.append(evidence.table)
+        if evidence.evidence_text and evidence.evidence_text not in snippets:
+            snippets.append(evidence.evidence_text)
+    return (
+        "; ".join(documents),
+        "; ".join(pages),
+        "; ".join(tables),
+        " || ".join(snippets),
+    )
+
+
 def process_map_to_dataframe(process_map: ProcessMap) -> pd.DataFrame:
     rows = []
     for group in process_map.technology_groups:
         for process in group.processes:
-            first_evidence = process.evidence[0] if process.evidence else None
+            documents, pages, tables, snippets = _evidence_summary(process.evidence)
             rows.append(
                 {
                     "include": True,
@@ -22,9 +46,10 @@ def process_map_to_dataframe(process_map: ProcessMap) -> pd.DataFrame:
                     "confidence": process.confidence,
                     "reason_for_separate_process": process.reason_for_separate_process,
                     "operations_not_separate_processes": "; ".join(op.name for op in process.operations),
-                    "page": first_evidence.page if first_evidence else None,
-                    "table": first_evidence.table if first_evidence else None,
-                    "evidence_text": first_evidence.evidence_text if first_evidence else None,
+                    "source_documents": documents,
+                    "pages": pages,
+                    "tables": tables,
+                    "evidence_text": snippets,
                 }
             )
     return pd.DataFrame(rows)
@@ -34,6 +59,7 @@ def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
     rows = []
     for i, flow in enumerate(extraction.flows):
         eligible = flow.direction == "input" and flow.amount is not None
+        documents, pages, tables, snippets = _evidence_summary(flow.evidence)
         rows.append(
             {
                 "include": eligible,
@@ -50,9 +76,10 @@ def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
                 "operation_context": flow.operation_context,
                 "component_or_stage": flow.component_or_stage,
                 "basis": flow.basis,
-                "page": flow.evidence.page,
-                "table": flow.evidence.table,
-                "evidence_text": flow.evidence.evidence_text,
+                "source_documents": documents,
+                "pages": pages,
+                "tables": tables,
+                "evidence_text": snippets,
                 "notes": flow.notes,
             }
         )
