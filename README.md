@@ -53,6 +53,8 @@ python -m pip install -e '.[test]'
 python -m pytest
 ```
 
+The branch also includes a GitHub Actions pytest workflow so pushes/PR updates are checked automatically.
+
 Run the app:
 
 ```bash
