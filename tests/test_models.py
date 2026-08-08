@@ -113,6 +113,47 @@ def test_inventory_validation_rejects_unapproved_process_and_unsupported_voltage
     assert any("voltage-level" in warning for warning in result.assumptions_or_warnings)
 
 
+def test_inventory_validation_rejects_detected_but_unapproved_process():
+    process_map = _pyrolysis_process_map()
+    second = ForegroundProcess(
+        name="Separately modelled carbon treatment",
+        evidence_type="inventory_table",
+        reason_for_separate_process="Separate inventory table.",
+        confidence="high",
+        evidence=[SourceEvidence(page=4, evidence_text="Carbon treatment inventory.")],
+    )
+    process_map.technology_groups[0].processes.append(second)
+    process_map = normalise_process_ids(process_map)
+
+    extraction = InventoryExtraction(
+        functional_unit="1 kg H2",
+        source_summary="Test source",
+        flows=[
+            InventoryFlow(
+                process_id="p002",
+                technology_group="Methane pyrolysis",
+                process_name="Separately modelled carbon treatment",
+                name="electricity",
+                amount=1.0,
+                unit="kWh",
+                direction="input",
+                flow_kind="energy",
+                evidence=SourceEvidence(evidence_text="Electricity: 1 kWh."),
+            )
+        ],
+    )
+
+    result = validate_inventory_against_process_map(
+        extraction,
+        process_map,
+        "Electricity: 1 kWh.",
+        allowed_process_ids={"p001"},
+    )
+
+    assert result.flows == []
+    assert any("unapproved process ID 'p002'" in warning for warning in result.assumptions_or_warnings)
+
+
 def test_only_quantified_inputs_default_to_background_matching():
     process_map = _pyrolysis_process_map()
     process = process_map.technology_groups[0].processes[0]
