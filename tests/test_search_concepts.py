@@ -111,3 +111,36 @@ def test_context_suffix_is_not_part_of_search_concept():
     assert flow.name == "concrete"
     assert flow.ecoinvent_search_term == "concrete"
     assert "plant construction" in (flow.component_or_stage or "")
+
+
+def test_steam_turbine_does_not_inherit_gas_turbine_dataset():
+    process_map = _process_map()
+    extraction = InventoryExtraction(
+        source_summary="paper plus supplement",
+        flows=[
+            InventoryFlow(
+                process_id="p001",
+                technology_group="SMR",
+                process_name="Steam methane reforming",
+                name="steam turbine",
+                amount=7.9e-10,
+                unit="unit",
+                direction="input",
+                flow_kind="other",
+                component_or_stage="plant construction",
+                ecoinvent_search_term="steam turbine",
+                ecoinvent_activity_hint="Market for gas turbine, 10MW electrical",
+                ecoinvent_location_hint="GLO",
+                evidence=[SourceEvidence(table="Table 2", evidence_text="Steam turbine Unit 7.90e-10")],
+                background_mapping_evidence=[
+                    SourceEvidence(table="Table S1", evidence_text="Gas turbine | Market for gas turbine, 10MW electrical | GLO | unit")
+                ],
+            )
+        ],
+    )
+
+    result = validate_inventory_against_process_map(extraction, process_map, "")
+    flow = result.flows[0]
+    assert flow.ecoinvent_activity_hint is None
+    assert flow.ecoinvent_location_hint is None
+    assert any("steam turbine" in warning and "gas turbine" in warning for warning in result.assumptions_or_warnings)
