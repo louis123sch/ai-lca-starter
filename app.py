@@ -86,9 +86,14 @@ def initial_search_query(row) -> str:
 
 
 def search_geography(row, process_map) -> tuple[str | None, str]:
-    explicit = _text(row.get("ecoinvent_location_hint"))
-    if explicit:
-        return explicit, "source-provided background mapping"
+    explicit_mapping = _text(row.get("ecoinvent_location_hint"))
+    if explicit_mapping:
+        return explicit_mapping, "source-provided background mapping"
+
+    exchange_geography = _text(row.get("exchange_geography_hint"))
+    if exchange_geography:
+        return exchange_geography, "exchange-specific source provenance"
+
     process_id = _text(row.get("process_id"))
     geography = process_geography(process_map, process_id) if process_map else None
     return geography, "foreground operating context"
@@ -197,6 +202,7 @@ if st.button("2. Analyse evidence corpus", type="primary", disabled=not bool(sou
             "candidate_geography_sources",
             "candidate_queries",
             "candidate_activity_types",
+            "candidate_technology_hints",
         ):
             st.session_state.pop(key, None)
     except Exception as exc:
@@ -320,6 +326,7 @@ if "process_map" in st.session_state:
                 "candidate_geography_sources",
                 "candidate_queries",
                 "candidate_activity_types",
+                "candidate_technology_hints",
             ):
                 st.session_state.pop(key, None)
         except Exception as exc:
@@ -330,7 +337,7 @@ if "extraction" in st.session_state:
     st.subheader("5. Review foreground inventory")
     st.caption(
         "Exchange names are bare LCI concepts. Lifecycle context such as plant construction is stored separately and is not part of the ecoinvent search term. "
-        "If an uploaded source explicitly specifies a database activity, that is shown as a separate source-provided mapping hint."
+        "Exchange-specific supply provenance and supplier technology are kept separate from the foreground process geography."
     )
 
     if extraction.assumptions_or_warnings:
@@ -348,12 +355,17 @@ if "extraction" in st.session_state:
             "background_match_eligible",
             "flow_id",
             "process_id",
+            "exchange_geography_hint",
+            "supplier_technology_hint",
+            "interpretation_reason",
             "source_documents",
             "pages",
             "tables",
             "evidence_text",
             "ecoinvent_activity_hint",
             "ecoinvent_location_hint",
+            "background_mapping_relation",
+            "background_mapping_rationale",
             "mapping_source_documents",
             "mapping_pages",
             "mapping_tables",
@@ -366,6 +378,9 @@ if "extraction" in st.session_state:
             "name": st.column_config.TextColumn("Exchange", width="medium"),
             "source_label": st.column_config.TextColumn("Source wording"),
             "component_or_stage": st.column_config.TextColumn("Stage / component", width="medium"),
+            "exchange_geography_hint": st.column_config.TextColumn("Exchange provenance", width="medium"),
+            "supplier_technology_hint": st.column_config.TextColumn("Supplier / technology", width="medium"),
+            "interpretation_reason": st.column_config.TextColumn("Why this is an exchange", width="large"),
             "ecoinvent_search_term": st.column_config.TextColumn(
                 "Clean search concept",
                 width="medium",
@@ -373,6 +388,8 @@ if "extraction" in st.session_state:
             ),
             "ecoinvent_activity_hint": st.column_config.TextColumn("Source-provided activity hint", width="large"),
             "ecoinvent_location_hint": st.column_config.TextColumn("Source-provided activity location"),
+            "background_mapping_relation": st.column_config.TextColumn("Mapping relation"),
+            "background_mapping_rationale": st.column_config.TextColumn("Mapping rationale", width="large"),
             "source_documents": st.column_config.TextColumn("Quantity evidence documents", width="large"),
             "mapping_source_documents": st.column_config.TextColumn("Mapping evidence documents", width="large"),
             "evidence_text": st.column_config.TextColumn("Quantity evidence", width="large"),
@@ -411,6 +428,7 @@ if "extraction" in st.session_state:
         candidate_geography_sources: dict[int, str] = {}
         candidate_queries: dict[int, str] = {}
         candidate_activity_types: dict[int, str] = {}
+        candidate_technology_hints: dict[int, str] = {}
         progress = st.progress(0.0)
 
         process_map = st.session_state.get("process_map")
@@ -420,12 +438,14 @@ if "extraction" in st.session_state:
             query = initial_search_query(row)
             geography, geography_source = search_geography(row, process_map)
             activity_type = suggested_activity_type(row)
+            technology_hint = _text(row.get("supplier_technology_hint"))
             unit = _text(row.get("unit")) or None
 
             candidate_geographies[flow_id] = geography
             candidate_geography_sources[flow_id] = geography_source
             candidate_queries[flow_id] = query
             candidate_activity_types[flow_id] = activity_type
+            candidate_technology_hints[flow_id] = technology_hint
 
             try:
                 candidate_map[flow_id] = search_candidates(
@@ -436,6 +456,7 @@ if "extraction" in st.session_state:
                     limit=candidate_limit,
                     unit=unit,
                     activity_type_hint=activity_type,
+                    technology_hint=technology_hint or None,
                 )
             except Exception as exc:
                 candidate_map[flow_id] = [{"error": str(exc)}]
@@ -446,6 +467,7 @@ if "extraction" in st.session_state:
         st.session_state["candidate_geography_sources"] = candidate_geography_sources
         st.session_state["candidate_queries"] = candidate_queries
         st.session_state["candidate_activity_types"] = candidate_activity_types
+        st.session_state["candidate_technology_hints"] = candidate_technology_hints
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
     st.subheader("7. Review real ecoinvent candidates")
@@ -460,6 +482,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
     candidate_geography_sources = st.session_state.get("candidate_geography_sources", {})
     candidate_queries = st.session_state.setdefault("candidate_queries", {})
     candidate_activity_types = st.session_state.setdefault("candidate_activity_types", {})
+    candidate_technology_hints = st.session_state.setdefault("candidate_technology_hints", {})
 
     for flow_id, candidates in list(st.session_state["candidates"].items()):
         matching = inv_df[inv_df["flow_id"] == flow_id]
@@ -473,6 +496,11 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
         unit = _text(row.get("unit"))
         explicit_activity_hint = _text(row.get("ecoinvent_activity_hint"))
         explicit_location_hint = _text(row.get("ecoinvent_location_hint"))
+        mapping_relation = _text(row.get("background_mapping_relation"))
+        mapping_rationale = _text(row.get("background_mapping_rationale"))
+        source_technology_hint = _text(row.get("supplier_technology_hint"))
+        exchange_provenance = _text(row.get("exchange_geography_hint"))
+        interpretation_reason = _text(row.get("interpretation_reason"))
         geography = candidate_geographies.get(flow_id)
         geography_source = candidate_geography_sources.get(flow_id, "foreground operating context")
 
@@ -486,17 +514,31 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
             context_bits.append(f"ranking geography: {geography} ({geography_source})")
         st.caption(" | ".join(context_bits))
 
+        if interpretation_reason:
+            st.caption(f"Why: {interpretation_reason}")
+        if exchange_provenance or source_technology_hint:
+            source_bits = []
+            if exchange_provenance:
+                source_bits.append(f"exchange provenance `{exchange_provenance}`")
+            if source_technology_hint:
+                source_bits.append(f"supplier/technology `{source_technology_hint}`")
+            st.info("**Source-derived matching context:** " + " · ".join(source_bits))
+
         if explicit_activity_hint:
-            mapping_text = f"**Source-provided background hint:** `{explicit_activity_hint}`"
+            relation_text = f" ({mapping_relation})" if mapping_relation else ""
+            mapping_text = f"**Source-provided background hint{relation_text}:** `{explicit_activity_hint}`"
             if explicit_location_hint:
                 mapping_text += f" · location `{explicit_location_hint}`"
+            if mapping_rationale:
+                mapping_text += f"\n\n{mapping_rationale}"
             st.info(mapping_text)
 
         current_type = candidate_activity_types.get(flow_id, suggested_activity_type(row))
         if current_type not in ACTIVITY_TYPE_OPTIONS:
             current_type = "unknown"
+        current_technology_hint = candidate_technology_hints.get(flow_id, source_technology_hint)
 
-        query_col, type_col, search_col = st.columns([5, 2, 1.4])
+        query_col, type_col, tech_col, search_col = st.columns([4.5, 2, 2.5, 1.4])
         with query_col:
             edited_query = st.text_input(
                 "Ecoinvent search query",
@@ -512,6 +554,13 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                 key=f"activity_type_{flow_id}",
                 help="Soft ranking/retrieval preference. Market is normally appropriate for purchased background products.",
             )
+        with tech_col:
+            edited_technology_hint = st.text_input(
+                "Supplier / technology search hint",
+                value=current_technology_hint,
+                key=f"technology_hint_{flow_id}",
+                help="Search-only hint, initially source-derived where available. It does not alter the foreground exchange.",
+            )
         with search_col:
             st.write("")
             st.write("")
@@ -525,6 +574,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
         if search_again:
             candidate_queries[flow_id] = edited_query.strip()
             candidate_activity_types[flow_id] = edited_activity_type
+            candidate_technology_hints[flow_id] = edited_technology_hint.strip()
             try:
                 st.session_state["candidates"][flow_id] = search_candidates(
                     project_name=project_name,
@@ -534,16 +584,19 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                     limit=candidate_limit,
                     unit=unit or None,
                     activity_type_hint=edited_activity_type,
+                    technology_hint=edited_technology_hint.strip() or None,
                 )
             except Exception as exc:
                 st.session_state["candidates"][flow_id] = [{"error": str(exc)}]
             st.session_state["candidate_queries"] = candidate_queries
             st.session_state["candidate_activity_types"] = candidate_activity_types
+            st.session_state["candidate_technology_hints"] = candidate_technology_hints
             st.session_state.pop(f"mapping_{flow_id}", None)
             st.rerun()
 
         current_query = candidate_queries.get(flow_id, initial_search_query(row))
         current_type = candidate_activity_types.get(flow_id, current_type)
+        current_technology_hint = candidate_technology_hints.get(flow_id, current_technology_hint)
 
         if not candidates:
             st.warning("No candidates returned. Edit the search controls above and search again.")
@@ -593,9 +646,12 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                     "process_name": process_name,
                     "source_activity_hint": explicit_activity_hint,
                     "source_activity_location": explicit_location_hint,
+                    "source_mapping_relation": mapping_relation,
                     "search_query": current_query,
                     "activity_type_preference": current_type,
+                    "technology_search_hint": current_technology_hint,
                     "ranking_geography": geography,
+                    "ranking_geography_source": geography_source,
                     **chosen,
                 }
             )
