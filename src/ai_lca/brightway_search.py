@@ -76,12 +76,7 @@ def _append_unique(values: list[str], value: str | None) -> None:
 
 
 def location_preferences_from_context(location_hint: str | None) -> list[str]:
-    """Translate evidence-derived geography into likely ecoinvent location labels.
-
-    The hint may be a clean country name (``Germany``) or a longer model-generated
-    phrase (``Germany primary; country-specific European results also reported``).
-    Geography only affects ranking; it never removes otherwise relevant candidates.
-    """
+    """Translate evidence-derived geography into likely ecoinvent location labels."""
     hint = (location_hint or "").strip()
     if not hint:
         return []
@@ -116,7 +111,6 @@ def location_preferences_from_context(location_hint: str | None) -> list[str]:
         _append_unique(preferences, country.alpha_3)
         _append_unique(preferences, country.name)
     except LookupError:
-        # Longer prose often contains a country name that lookup cannot parse directly.
         for country in pycountry.countries:
             names = [country.name]
             official_name = getattr(country, "official_name", None)
@@ -197,6 +191,13 @@ def _score_candidate(
     name = (candidate.get("name") or "").strip().lower()
     product = (candidate.get("reference_product") or "").strip().lower()
 
+    if q and q == name:
+        score += 34
+        reasons.append("activity name exactly matches query")
+    elif q and q in name:
+        score += 16
+        reasons.append("activity name contains query")
+
     if q and q == product:
         score += 30
         reasons.append("reference product exactly matches query")
@@ -206,10 +207,6 @@ def _score_candidate(
     elif product and product in q:
         score += 14
         reasons.append("query contains reference product")
-
-    if q and q in name:
-        score += 14
-        reasons.append("activity name contains query")
 
     query_tokens = _tokens(q)
     candidate_tokens = _tokens(f"{name} {product}")
@@ -255,11 +252,7 @@ def search_candidates(
     unit: str | None = None,
     activity_type_hint: str | None = None,
 ) -> list[dict]:
-    """Retrieve and explain ranked real Brightway/ecoinvent candidates.
-
-    Search variants and ranking preferences improve recall and ordering, but they do
-    not fabricate activities and they do not hard-filter geography or activity type.
-    """
+    """Retrieve and explain ranked real Brightway/ecoinvent candidates."""
     set_project(project_name)
     if database_name not in bd.databases:
         raise KeyError(f"Database '{database_name}' not found in Brightway project '{project_name}'")
@@ -285,8 +278,6 @@ def search_candidates(
                 collected.append((activity, retrieval_rank))
                 retrieval_rank += 1
 
-    # A location-specific supplementary pass helps surface a relevant national
-    # dataset that Brightway's general full-text search may rank too low.
     for location in preferences:
         if len(location) > 3 and location not in {"GLO", "RoW", "RER"}:
             continue
