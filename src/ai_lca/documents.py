@@ -90,3 +90,22 @@ def extract_docx_text(docx_bytes: bytes) -> str:
     if not combined:
         raise ValueError("No readable text or table content was found in the Word document.")
     return combined
+
+
+def combine_document_texts(documents: list[tuple[str, str]]) -> str:
+    """Combine multiple extracted documents while retaining document provenance.
+
+    Each document is wrapped in an explicit marker. This lets the LLM distinguish,
+    for example, the main paper from supplementary information and return the source
+    filename for every piece of evidence.
+    """
+    chunks: list[str] = []
+    for filename, text in documents:
+        clean_name = " ".join((filename or "unnamed document").split())
+        clean_text = (text or "").strip()
+        if not clean_text:
+            continue
+        chunks.append(
+            f"[DOCUMENT {clean_name}]\n{clean_text}\n[END DOCUMENT {clean_name}]"
+        )
+    return "\n\n".join(chunks).strip()
