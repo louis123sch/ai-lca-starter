@@ -77,7 +77,6 @@ def _strip_contextual_suffix(value: str | None) -> tuple[str, str | None]:
 
 def _clean_search_term(value: str | None, fallback: str) -> str:
     cleaned, _ = _strip_contextual_suffix(value or fallback)
-    # ecoinvent generally uses British spelling; this affects only retrieval, not source wording.
     if cleaned.casefold() == "aluminum":
         return "aluminium"
     return cleaned
@@ -229,7 +228,6 @@ def validate_inventory_against_process_map(
                     warnings.append(note)
                     break
 
-        # An exact activity hint is usable only when it has separate source evidence.
         if flow.ecoinvent_activity_hint and not flow.background_mapping_evidence:
             warnings.append(
                 f"Removed unsupported ecoinvent activity hint '{flow.ecoinvent_activity_hint}' for flow '{flow.name}' because no mapping evidence was supplied."
@@ -237,8 +235,6 @@ def validate_inventory_against_process_map(
             flow.ecoinvent_activity_hint = None
             flow.ecoinvent_location_hint = None
 
-        # Do not let a generic foreground steel row inherit a specific steel grade
-        # merely because several steel datasets are listed elsewhere in the corpus.
         if flow.ecoinvent_activity_hint and _normalise_name(flow.name) == "steel":
             hint_lower = flow.ecoinvent_activity_hint.casefold()
             quantity_supports_subtype = any(term in evidence_lower for term in STEEL_SUBTYPE_TERMS)
