@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from .mapping_evidence import apply_source_mapping_hint
 from .models import InventoryExtraction, ProcessMap
 
 
@@ -161,6 +162,45 @@ def process_index(process_map: ProcessMap) -> dict[str, tuple[str, object]]:
     return index
 
 
+def _normalise_exchange_class(flow, warnings: list[str]) -> None:
+    """Deterministically enforce obvious exchange-class relationships."""
+    if flow.direction == "emission" or flow.flow_kind == "emission":
+        if flow.exchange_type != "biosphere":
+            warnings.append(
+                f"Reclassified direct emission '{flow.name}' as a biosphere exchange."
+            )
+            flow.exchange_type = "biosphere"
+
+    if flow.direction == "output" and flow.flow_kind == "product":
+        if flow.exchange_type == "technosphere":
+            flow.exchange_type = "production"
+
+    if flow.exchange_type == "biosphere":
+        flow.biosphere_search_term = _clean_search_term(flow.biosphere_search_term, flow.name)
+        flow.ecoinvent_search_term = None
+        flow.ecoinvent_activity_hint = None
+        flow.ecoinvent_location_hint = None
+        flow.background_mapping_relation = None
+        flow.background_mapping_rationale = None
+        flow.background_mapping_evidence = []
+        return
+
+    if flow.exchange_type == "production":
+        flow.ecoinvent_search_term = None
+        flow.ecoinvent_activity_hint = None
+        flow.ecoinvent_location_hint = None
+        flow.background_mapping_relation = None
+        flow.background_mapping_rationale = None
+        flow.background_mapping_evidence = []
+        flow.biosphere_search_term = None
+        flow.biosphere_compartment_hint = None
+        return
+
+    if flow.exchange_type == "technosphere":
+        flow.biosphere_search_term = None
+        flow.biosphere_compartment_hint = None
+
+
 def validate_inventory_against_process_map(
     extraction: InventoryExtraction,
     process_map: ProcessMap,
@@ -207,78 +247,86 @@ def validate_inventory_against_process_map(
             flow.notes = f"{flow.notes}; {note}" if flow.notes else note
             warnings.append(note)
 
-        flow.ecoinvent_search_term = _clean_search_term(flow.ecoinvent_search_term, flow.name)
+        _normalise_exchange_class(flow, warnings)
 
-        flow_name_lower = flow.name.lower()
-        evidence_lower = " ".join(e.evidence_text for e in flow.evidence).lower()
-        if "electricity" in flow_name_lower:
-            for qualifier in ELECTRICITY_VOLTAGE_QUALIFIERS:
-                if qualifier in flow_name_lower and qualifier not in evidence_lower:
-                    original_name = flow.name
-                    flow.name = "electricity"
-                    flow.ecoinvent_search_term = "electricity"
-                    note = (
-                        f"Removed unsupported voltage-level qualifier from '{original_name}'; "
-                        "the evidence cited for the foreground quantity does not state that voltage level."
-                    )
-                    flow.notes = f"{flow.notes}; {note}" if flow.notes else note
-                    warnings.append(note)
-                    break
+        if flow.exchange_type == "technosphere":
+            flow.ecoinvent_search_term = _clean_search_term(flow.ecoinvent_search_term, flow.name)
 
-        if flow.ecoinvent_activity_hint and not flow.background_mapping_evidence:
-            warnings.append(
-                f"Removed unsupported ecoinvent activity hint '{flow.ecoinvent_activity_hint}' for flow '{flow.name}' because no mapping evidence was supplied."
-            )
-            flow.ecoinvent_activity_hint = None
-            flow.ecoinvent_location_hint = None
-            flow.background_mapping_relation = None
-            flow.background_mapping_rationale = None
+            flow_name_lower = flow.name.lower()
+            evidence_lower = " ".join(e.evidence_text for e in flow.evidence).lower()
+            if "electricity" in flow_name_lower:
+                for qualifier in ELECTRICITY_VOLTAGE_QUALIFIERS:
+                    if qualifier in flow_name_lower and qualifier not in evidence_lower:
+                        original_name = flow.name
+                        flow.name = "electricity"
+                        flow.ecoinvent_search_term = "electricity"
+                        note = (
+                            f"Removed unsupported voltage-level qualifier from '{original_name}'; "
+                            "the evidence cited for the foreground quantity does not state that voltage level."
+                        )
+                        flow.notes = f"{flow.notes}; {note}" if flow.notes else note
+                        warnings.append(note)
+                        break
 
-        if flow.ecoinvent_activity_hint and flow.background_mapping_relation is None:
-            flow.background_mapping_relation = "uncertain"
-            warnings.append(
-                f"Background activity hint for '{flow.name}' has source evidence but no stated exact/proxy relation; marked uncertain for review."
-            )
+            # Recover explicit cross-document mappings even when the model misses them.
+            apply_source_mapping_hint(flow, source_text)
 
-        if not flow.ecoinvent_activity_hint:
-            flow.ecoinvent_location_hint = None
-            flow.background_mapping_relation = None
-            flow.background_mapping_rationale = None
-
-        if flow.ecoinvent_activity_hint and _normalise_name(flow.name) == "steel":
-            hint_lower = flow.ecoinvent_activity_hint.casefold()
-            quantity_supports_subtype = any(term in evidence_lower for term in STEEL_SUBTYPE_TERMS)
-            hint_is_specific_subtype = any(term in hint_lower for term in STEEL_SUBTYPE_TERMS)
-            if hint_is_specific_subtype and not quantity_supports_subtype and flow.background_mapping_relation != "proxy":
-                rejected_hint = flow.ecoinvent_activity_hint
+            if flow.ecoinvent_activity_hint and not flow.background_mapping_evidence:
+                warnings.append(
+                    f"Removed unsupported ecoinvent activity hint '{flow.ecoinvent_activity_hint}' for flow '{flow.name}' because no mapping evidence was supplied."
+                )
                 flow.ecoinvent_activity_hint = None
                 flow.ecoinvent_location_hint = None
                 flow.background_mapping_relation = None
                 flow.background_mapping_rationale = None
-                flow.background_mapping_evidence = []
+
+            if flow.ecoinvent_activity_hint and flow.background_mapping_relation is None:
+                flow.background_mapping_relation = "uncertain"
                 warnings.append(
-                    f"Removed over-specific steel mapping hint '{rejected_hint}' because the quantitative foreground evidence identifies only generic steel and no proxy relationship was supported."
+                    f"Background activity hint for '{flow.name}' has source evidence but no stated exact/proxy relation; marked uncertain for review."
                 )
 
-        if flow.ecoinvent_activity_hint and "steam turbine" in _normalise_name(flow.name):
-            if "gas turbine" in flow.ecoinvent_activity_hint.casefold():
-                if flow.background_mapping_relation != "proxy":
-                    flow.background_mapping_relation = "proxy"
+            if not flow.ecoinvent_activity_hint:
+                flow.ecoinvent_location_hint = None
+                flow.background_mapping_relation = None
+                flow.background_mapping_rationale = None
+
+            if flow.ecoinvent_activity_hint and _normalise_name(flow.name) == "steel":
+                hint_lower = flow.ecoinvent_activity_hint.casefold()
+                quantity_supports_subtype = any(term in evidence_lower for term in STEEL_SUBTYPE_TERMS)
+                hint_is_specific_subtype = any(term in hint_lower for term in STEEL_SUBTYPE_TERMS)
+                if hint_is_specific_subtype and not quantity_supports_subtype and flow.background_mapping_relation != "proxy":
+                    rejected_hint = flow.ecoinvent_activity_hint
+                    flow.ecoinvent_activity_hint = None
+                    flow.ecoinvent_location_hint = None
+                    flow.background_mapping_relation = None
+                    flow.background_mapping_rationale = None
+                    flow.background_mapping_evidence = []
                     warnings.append(
-                        "Treated the source-supported gas-turbine background activity as a proxy for the foreground steam turbine; the foreground exchange remains 'steam turbine'."
+                        f"Removed over-specific steel mapping hint '{rejected_hint}' because the quantitative foreground evidence identifies only generic steel and no proxy relationship was supported."
                     )
-                if not flow.background_mapping_rationale:
-                    flow.background_mapping_rationale = (
-                        "Foreground evidence identifies a steam turbine while the source's applied background-data list identifies a gas-turbine activity; this is represented as a proxy rather than an exact identity."
-                    )
+
+            if flow.ecoinvent_activity_hint and "steam turbine" in _normalise_name(flow.name):
+                if "gas turbine" in flow.ecoinvent_activity_hint.casefold():
+                    if flow.background_mapping_relation != "proxy":
+                        flow.background_mapping_relation = "proxy"
+                        warnings.append(
+                            "Treated the source-supported gas-turbine background activity as a proxy for the foreground steam turbine; the foreground exchange remains 'steam turbine'."
+                        )
+                    if not flow.background_mapping_rationale:
+                        flow.background_mapping_rationale = (
+                            "Foreground evidence identifies a steam turbine while the source's applied background-data list identifies a gas-turbine activity; this is represented as a proxy rather than an exact identity."
+                        )
 
         key = (
             flow.process_id,
+            flow.exchange_type,
             _normalise_name(flow.name),
             flow.amount,
             _normalise_name(flow.unit),
             flow.direction,
             _normalise_name(flow.basis),
+            _normalise_name(flow.biosphere_compartment_hint) if flow.exchange_type == "biosphere" else "",
         )
         if key in seen:
             existing = validated[seen[key]]
@@ -294,6 +342,7 @@ def validate_inventory_against_process_map(
             for field_name, label in (
                 ("exchange_geography_hint", "exchange geography"),
                 ("supplier_technology_hint", "supplier/technology"),
+                ("biosphere_compartment_hint", "biosphere compartment"),
             ):
                 existing_value = getattr(existing, field_name)
                 incoming_value = getattr(flow, field_name)
@@ -320,6 +369,8 @@ def validate_inventory_against_process_map(
                 existing.ecoinvent_location_hint = flow.ecoinvent_location_hint
                 existing.background_mapping_relation = flow.background_mapping_relation
                 existing.background_mapping_rationale = flow.background_mapping_rationale
+            if not existing.biosphere_search_term and flow.biosphere_search_term:
+                existing.biosphere_search_term = flow.biosphere_search_term
             if flow.notes and flow.notes not in (existing.notes or ""):
                 existing.notes = f"{existing.notes}; {flow.notes}" if existing.notes else flow.notes
             warnings.append(
