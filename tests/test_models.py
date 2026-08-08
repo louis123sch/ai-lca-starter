@@ -257,3 +257,82 @@ def test_one_flow_can_be_supported_across_multiple_documents():
     assert "supplement.docx" in df.iloc[0]["source_documents"]
     assert "The plasma reactor is electrically heated." in df.iloc[0]["evidence_text"]
     assert "Electricity | 10 kWh/kg H2" in df.iloc[0]["evidence_text"]
+
+
+def test_plant_construction_context_is_removed_from_flow_and_search_name():
+    process_map = _pyrolysis_process_map()
+    process = process_map.technology_groups[0].processes[0]
+    extraction = InventoryExtraction(
+        source_summary="Hermesmann-style construction inventory",
+        flows=[
+            InventoryFlow(
+                process_id=process.process_id,
+                technology_group="Methane pyrolysis",
+                process_name=process.name,
+                name="concrete (plant construction)",
+                amount=6.6e-6,
+                unit="m3",
+                direction="input",
+                flow_kind="material",
+                evidence=[SourceEvidence(source_document="paper.pdf", table="Table 2", evidence_text="Concrete m3 6.60e-06")],
+            ),
+            InventoryFlow(
+                process_id=process.process_id,
+                technology_group="Methane pyrolysis",
+                process_name=process.name,
+                name="aluminum (plant construction)",
+                amount=4.17e-5,
+                unit="kg",
+                direction="input",
+                flow_kind="material",
+                evidence=[SourceEvidence(source_document="paper.pdf", table="Table 2", evidence_text="Aluminum kg 4.17e-05")],
+            ),
+        ],
+    )
+
+    result = validate_inventory_against_process_map(extraction, process_map, "")
+    assert result.flows[0].name == "concrete"
+    assert result.flows[0].ecoinvent_search_term == "concrete"
+    assert "plant construction" in (result.flows[0].component_or_stage or "")
+    assert result.flows[1].name == "aluminum"
+    assert result.flows[1].ecoinvent_search_term == "aluminium"
+
+
+def test_explicit_background_mapping_is_kept_separate_from_foreground_quantity():
+    process_map = _pyrolysis_process_map()
+    process = process_map.technology_groups[0].processes[0]
+    extraction = InventoryExtraction(
+        source_summary="Paper plus supplementary database table",
+        flows=[
+            InventoryFlow(
+                process_id=process.process_id,
+                technology_group="Methane pyrolysis",
+                process_name=process.name,
+                name="concrete",
+                source_label="Concrete",
+                amount=6.6e-6,
+                unit="m3",
+                direction="input",
+                flow_kind="material",
+                component_or_stage="plant construction",
+                ecoinvent_search_term="concrete",
+                ecoinvent_activity_hint="Market for concrete, normal",
+                ecoinvent_location_hint="RoW",
+                evidence=[SourceEvidence(source_document="paper.pdf", table="Table 2", evidence_text="Concrete m3 6.60e-06")],
+                background_mapping_evidence=[
+                    SourceEvidence(
+                        source_document="supplement.docx",
+                        table="Table S1",
+                        evidence_text="Concrete | Market for concrete, normal | RoW | m3",
+                    )
+                ],
+            )
+        ],
+    )
+
+    result = validate_inventory_against_process_map(extraction, process_map, "")
+    df = extraction_to_dataframe(result)
+    assert result.flows[0].name == "concrete"
+    assert result.flows[0].ecoinvent_activity_hint == "Market for concrete, normal"
+    assert result.flows[0].ecoinvent_location_hint == "RoW"
+    assert "supplement.docx" in df.iloc[0]["mapping_source_documents"]
