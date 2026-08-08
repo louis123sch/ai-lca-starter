@@ -112,6 +112,24 @@ class InventoryFlow(BaseModel):
         description="Lifecycle/component context such as plant construction or operation; never part of the exchange/search name.",
     )
     basis: str | None = None
+    exchange_geography_hint: str | None = Field(
+        default=None,
+        description=(
+            "Exchange-specific source/provenance geography explicitly supported by the evidence, e.g. Norway for a natural-gas supply route. "
+            "Keep this separate from the foreground process operating geography."
+        ),
+    )
+    supplier_technology_hint: str | None = Field(
+        default=None,
+        description=(
+            "Explicit supply technology/provenance useful for background matching, e.g. offshore wind, North Sea natural gas, or a named production route. "
+            "Do not infer it from general engineering knowledge."
+        ),
+    )
+    interpretation_reason: str | None = Field(
+        default=None,
+        description="Short reviewable explanation of why this item is an LCI exchange and how any matching hints were interpreted.",
+    )
     ecoinvent_search_term: str | None = Field(
         default=None,
         description="Bare concept used for ecoinvent retrieval when no source-provided background mapping is available.",
