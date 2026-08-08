@@ -58,10 +58,11 @@ Rules:
 18. If a flow is mentioned but no amount is given, amount must be null.
 19. Keep construction/capital inputs distinct from operational inputs through `component_or_stage` while retaining each actual material/equipment exchange separately.
 20. Do not collapse explicit construction materials into a synthetic flow such as `plant construction` or `plant manufacturing`. If the source gives concrete, steel and aluminium separately, return concrete, steel and aluminium separately.
-21. Keep outputs/co-products distinct from inputs.
-22. Preserve the stated basis. Do not silently convert bases.
-23. Include evidence records for each flow. Populate source_document from [DOCUMENT ...] markers and page/table/section where available.
-24. The result is a proposal for human review, not an approved LCA model.
+21. Never substitute a similar but different equipment type from another source table. For example, a foreground `steam turbine` must not be assigned a source-provided `gas turbine` dataset unless the corpus explicitly states that substitution.
+22. Keep outputs/co-products distinct from inputs.
+23. Preserve the stated basis. Do not silently convert bases.
+24. Include evidence records for each flow. Populate source_document from [DOCUMENT ...] markers and page/table/section where available.
+25. The result is a proposal for human review, not an approved LCA model.
 """
 
 
