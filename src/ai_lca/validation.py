@@ -15,7 +15,7 @@ def normalise_process_ids(process_map: ProcessMap) -> ProcessMap:
     for group in result.technology_groups:
         supported = []
         for process in group.processes:
-            if not process.evidence:
+            if not process.evidence or not any(e.evidence_text.strip() for e in process.evidence):
                 warnings.append(
                     f"Discarded unsupported process candidate '{process.name}' because no direct source evidence was supplied."
                 )
@@ -42,10 +42,14 @@ def validate_inventory_against_process_map(
     extraction: InventoryExtraction,
     process_map: ProcessMap,
     source_text: str,
+    allowed_process_ids: set[str] | None = None,
 ) -> InventoryExtraction:
-    """Deterministically prevent invented processes and obvious unsupported specificity."""
+    """Deterministically prevent invented/unapproved processes and unsupported specificity."""
     result = extraction.model_copy(deep=True)
     index = process_index(process_map)
+    if allowed_process_ids is not None:
+        index = {key: value for key, value in index.items() if key in allowed_process_ids}
+
     source_lower = (source_text or "").lower()
     warnings = list(result.assumptions_or_warnings)
     validated = []
