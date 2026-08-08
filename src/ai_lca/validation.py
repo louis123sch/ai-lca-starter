@@ -82,6 +82,12 @@ def _clean_search_term(value: str | None, fallback: str) -> str:
     return cleaned
 
 
+def _looks_like_lcia_equivalent_unit(unit: str | None) -> bool:
+    """Identify impact-indicator units that must not become elementary flows."""
+    compact = re.sub(r"[^a-z0-9]+", "", (unit or "").casefold().replace("₂", "2"))
+    return "co2eq" in compact or "co2e" in compact
+
+
 def normalise_process_ids(process_map: ProcessMap) -> ProcessMap:
     result = process_map.model_copy(deep=True)
     warnings = list(result.assumptions_or_warnings)
@@ -230,6 +236,16 @@ def validate_inventory_against_process_map(
             )
             continue
 
+        if (
+            flow.exchange_type == "biosphere"
+            or flow.direction == "emission"
+            or flow.flow_kind == "emission"
+        ) and _looks_like_lcia_equivalent_unit(flow.unit):
+            warnings.append(
+                f"Discarded '{flow.name}' as a biosphere exchange because its unit '{flow.unit}' is an LCIA-equivalent indicator (e.g. CO2-eq), not an elementary-flow quantity."
+            )
+            continue
+
         technology_group, process = process_info
         flow.technology_group = technology_group
         flow.process_name = process.name
@@ -268,7 +284,6 @@ def validate_inventory_against_process_map(
                         warnings.append(note)
                         break
 
-            # Recover explicit cross-document mappings even when the model misses them.
             apply_source_mapping_hint(flow, source_text)
 
             if flow.ecoinvent_activity_hint and not flow.background_mapping_evidence:
