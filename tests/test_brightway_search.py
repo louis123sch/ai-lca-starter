@@ -36,3 +36,8 @@ def test_market_hint_adds_market_query_variant():
 def test_exact_market_activity_query_is_not_prefixed_twice():
     variants = _query_variants("Market for concrete, normal", "market")
     assert variants == ["Market for concrete, normal"]
+
+
+def test_supplier_technology_hint_adds_retrieval_variant_without_changing_base_query():
+    variants = _query_variants("electricity", "market", "offshore wind")
+    assert variants == ["electricity", "market for electricity", "electricity offshore wind"]
