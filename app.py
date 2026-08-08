@@ -6,10 +6,15 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from ai_lca.brightway_search import list_databases, search_candidates
+from ai_lca.brightway_search import (
+    list_databases,
+    search_biosphere_candidates,
+    search_candidates,
+)
 from ai_lca.documents import combine_document_texts, extract_docx_text, extract_pdf_text
 from ai_lca.export import dataframe_to_json, extraction_to_dataframe, process_map_to_dataframe
 from ai_lca.llm import extract_inventory_from_text, extract_process_map_from_text
+from ai_lca.selection import recommended_candidate_index
 
 load_dotenv()
 
@@ -17,7 +22,7 @@ st.set_page_config(page_title="AI-LCA Foreground Builder", layout="wide")
 st.title("AI-LCA Foreground Builder")
 st.caption(
     "AI maps the evidence corpus → human confirms foreground processes → "
-    "AI extracts exchanges → human approves background mappings → Brightway calculates"
+    "AI extracts technosphere + biosphere exchanges → human approves mappings → Brightway calculates"
 )
 
 ACTIVITY_TYPE_OPTIONS = [
@@ -29,12 +34,17 @@ ACTIVITY_TYPE_OPTIONS = [
     "operation",
     "unknown",
 ]
+EXCHANGE_TYPE_OPTIONS = ["technosphere", "biosphere", "production", "unknown"]
 
 
 def _text(value) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
     return str(value).strip()
+
+
+def _has_amount(value) -> bool:
+    return value is not None and not (isinstance(value, float) and pd.isna(value))
 
 
 def process_geography(process_map, process_id: str) -> str | None:
@@ -85,6 +95,10 @@ def initial_search_query(row) -> str:
     )
 
 
+def initial_biosphere_query(row) -> str:
+    return _text(row.get("biosphere_search_term")) or _text(row.get("name"))
+
+
 def search_geography(row, process_map) -> tuple[str | None, str]:
     explicit_mapping = _text(row.get("ecoinvent_location_hint"))
     if explicit_mapping:
@@ -99,6 +113,45 @@ def search_geography(row, process_map) -> tuple[str | None, str]:
     return geography, "foreground operating context"
 
 
+def refresh_match_flags(df: pd.DataFrame) -> pd.DataFrame:
+    """Recompute matching eligibility after human edits exchange class/direction/amount."""
+    result = df.copy()
+    if result.empty:
+        return result
+
+    targets = []
+    eligible_values = []
+    for _, row in result.iterrows():
+        exchange_type = _text(row.get("exchange_type")).lower()
+        direction = _text(row.get("direction")).lower()
+        has_amount = _has_amount(row.get("amount"))
+        technosphere = exchange_type == "technosphere" and direction == "input" and has_amount
+        biosphere = exchange_type == "biosphere" and has_amount
+        eligible = technosphere or biosphere
+        eligible_values.append(eligible)
+        targets.append("technosphere" if technosphere else "biosphere" if biosphere else "none")
+
+    result["background_match_eligible"] = eligible_values
+    result["match_target"] = targets
+    if "include" in result.columns:
+        result.loc[~result["background_match_eligible"].astype(bool), "include"] = False
+    return result
+
+
+def reset_candidate_state() -> None:
+    for key in (
+        "candidates",
+        "candidate_targets",
+        "candidate_geographies",
+        "candidate_geography_sources",
+        "candidate_queries",
+        "candidate_activity_types",
+        "candidate_technology_hints",
+        "candidate_compartments",
+    ):
+        st.session_state.pop(key, None)
+
+
 with st.sidebar:
     st.header("Configuration")
     model = st.text_input("OpenAI model", value=os.getenv("OPENAI_MODEL", "gpt-5-mini"))
@@ -106,14 +159,35 @@ with st.sidebar:
     candidate_limit = st.slider("Candidates per flow", 3, 20, 8)
 
     database_name = ""
+    biosphere_database_name = ""
     if project_name:
         try:
             dbs = list_databases(project_name)
-            if dbs:
-                default_index = next((i for i, name in enumerate(dbs) if "ecoinvent" in name.lower()), 0)
-                database_name = st.selectbox("Background database", dbs, index=default_index)
+            background_dbs = [name for name in dbs if "biosphere" not in name.casefold()]
+            biosphere_dbs = [name for name in dbs if "biosphere" in name.casefold()]
+
+            if background_dbs:
+                default_index = next(
+                    (i for i, name in enumerate(background_dbs) if "ecoinvent" in name.lower()),
+                    0,
+                )
+                database_name = st.selectbox("Technosphere database", background_dbs, index=default_index)
             else:
-                st.warning("No databases found in this Brightway project.")
+                st.warning("No technosphere/background database found in this Brightway project.")
+
+            if biosphere_dbs:
+                default_bio = next(
+                    (i for i, name in enumerate(biosphere_dbs) if name.casefold() == "biosphere3"),
+                    0,
+                )
+                biosphere_database_name = st.selectbox(
+                    "Biosphere database",
+                    biosphere_dbs,
+                    index=default_bio,
+                    help="Direct elementary emissions/resources are linked here, not to ecoinvent technosphere activities.",
+                )
+            else:
+                st.warning("No biosphere database found. Direct emissions/resources can still be extracted, but cannot yet be linked.")
         except Exception as exc:
             st.warning(f"Brightway project not available yet: {exc}")
 
@@ -170,7 +244,7 @@ with upload_tab:
 
 extra_instructions = st.text_area(
     "Optional study instructions",
-    placeholder="Example: Focus on cradle-to-gate foreground inputs for 1 kg H2; keep infrastructure and operation separate.",
+    placeholder="Example: Focus on cradle-to-gate foreground exchanges for 1 kg H2; retain direct process emissions as biosphere flows.",
     height=90,
 )
 
@@ -181,7 +255,7 @@ source_text = combine_document_texts(corpus_documents)
 
 if corpus_documents:
     st.info(
-        f"Evidence corpus: {len(corpus_documents)} source(s). Processes and flows are built from the combined evidence."
+        f"Evidence corpus: {len(corpus_documents)} source(s). Processes and exchanges are built from the combined evidence."
     )
 
 if st.button("2. Analyse evidence corpus", type="primary", disabled=not bool(source_text)):
@@ -194,17 +268,9 @@ if st.button("2. Analyse evidence corpus", type="primary", disabled=not bool(sou
             )
         st.session_state["process_map"] = process_map
         st.session_state["process_map_df"] = process_map_to_dataframe(process_map)
-        for key in (
-            "extraction",
-            "inventory_df",
-            "candidates",
-            "candidate_geographies",
-            "candidate_geography_sources",
-            "candidate_queries",
-            "candidate_activity_types",
-            "candidate_technology_hints",
-        ):
-            st.session_state.pop(key, None)
+        st.session_state.pop("extraction", None)
+        st.session_state.pop("inventory_df", None)
+        reset_candidate_state()
     except Exception as exc:
         st.exception(exc)
 
@@ -308,9 +374,9 @@ if "process_map" in st.session_state:
             process_df["include"] == True, "process_id"  # noqa: E712
         ].astype(str).tolist()
 
-    if st.button("4. Extract inventory for selected processes", disabled=not bool(selected_process_ids)):
+    if st.button("4. Extract complete inventory for selected processes", disabled=not bool(selected_process_ids)):
         try:
-            with st.spinner("Building foreground inventories from all relevant evidence…"):
+            with st.spinner("Building technosphere, production and biosphere exchanges from all relevant evidence…"):
                 extraction = extract_inventory_from_text(
                     source_text,
                     process_map=process_map,
@@ -320,24 +386,16 @@ if "process_map" in st.session_state:
                 )
             st.session_state["extraction"] = extraction
             st.session_state["inventory_df"] = extraction_to_dataframe(extraction)
-            for key in (
-                "candidates",
-                "candidate_geographies",
-                "candidate_geography_sources",
-                "candidate_queries",
-                "candidate_activity_types",
-                "candidate_technology_hints",
-            ):
-                st.session_state.pop(key, None)
+            reset_candidate_state()
         except Exception as exc:
             st.exception(exc)
 
 if "extraction" in st.session_state:
     extraction = st.session_state["extraction"]
-    st.subheader("5. Review foreground inventory")
+    st.subheader("5. Review complete foreground inventory")
     st.caption(
-        "Exchange names are bare LCI concepts. Lifecycle context such as plant construction is stored separately and is not part of the ecoinvent search term. "
-        "Exchange-specific supply provenance and supplier technology are kept separate from the foreground process geography."
+        "Technosphere exchanges link to background activities; biosphere exchanges are direct elementary emissions/resources; "
+        "production exchanges are reference products/co-products. Lifecycle context such as plant construction remains separate from search names."
     )
 
     if extraction.assumptions_or_warnings:
@@ -353,6 +411,7 @@ if "extraction" in st.session_state:
         num_rows="dynamic",
         disabled=[
             "background_match_eligible",
+            "match_target",
             "flow_id",
             "process_id",
             "exchange_geography_hint",
@@ -372,19 +431,31 @@ if "extraction" in st.session_state:
             "mapping_evidence_text",
         ],
         column_config={
-            "include": st.column_config.CheckboxColumn("Search ecoinvent"),
+            "include": st.column_config.CheckboxColumn("Match in Brightway"),
             "background_match_eligible": st.column_config.CheckboxColumn("Eligible"),
+            "match_target": st.column_config.TextColumn("Match target", disabled=True),
             "flow_id": st.column_config.NumberColumn("ID", disabled=True),
             "name": st.column_config.TextColumn("Exchange", width="medium"),
             "source_label": st.column_config.TextColumn("Source wording"),
+            "exchange_type": st.column_config.SelectboxColumn("Exchange class", options=EXCHANGE_TYPE_OPTIONS, required=True),
             "component_or_stage": st.column_config.TextColumn("Stage / component", width="medium"),
             "exchange_geography_hint": st.column_config.TextColumn("Exchange provenance", width="medium"),
             "supplier_technology_hint": st.column_config.TextColumn("Supplier / technology", width="medium"),
             "interpretation_reason": st.column_config.TextColumn("Why this is an exchange", width="large"),
             "ecoinvent_search_term": st.column_config.TextColumn(
-                "Clean search concept",
+                "Technosphere search concept",
                 width="medium",
-                help="Editable retrieval concept; stage labels such as plant construction should not appear here.",
+                help="Editable retrieval concept for technosphere exchanges only; lifecycle-stage labels should not appear here.",
+            ),
+            "biosphere_search_term": st.column_config.TextColumn(
+                "Biosphere search concept",
+                width="medium",
+                help="Elementary-flow concept for direct emissions/resources, e.g. carbon dioxide or methane.",
+            ),
+            "biosphere_compartment_hint": st.column_config.TextColumn(
+                "Biosphere compartment",
+                width="medium",
+                help="Only when source-supported, e.g. air, water, soil, natural resource.",
             ),
             "ecoinvent_activity_hint": st.column_config.TextColumn("Source-provided activity hint", width="large"),
             "ecoinvent_location_hint": st.column_config.TextColumn("Source-provided activity location"),
@@ -397,7 +468,14 @@ if "extraction" in st.session_state:
         },
         key="inventory_editor",
     )
+    edited_df = refresh_match_flags(edited_df)
     st.session_state["inventory_df"] = edited_df
+
+    type_counts = edited_df["exchange_type"].value_counts().to_dict() if not edited_df.empty else {}
+    st.caption(
+        f"Inventory classes: {type_counts.get('technosphere', 0)} technosphere · "
+        f"{type_counts.get('biosphere', 0)} biosphere · {type_counts.get('production', 0)} production."
+    )
 
     left, right = st.columns(2)
     with left:
@@ -419,70 +497,111 @@ if "extraction" in st.session_state:
         (edited_df["include"] == True)  # noqa: E712
         & (edited_df["background_match_eligible"] == True)  # noqa: E712
     ]
-    st.caption(f"{len(searchable)} quantified input exchange(s) selected for ecoinvent matching.")
+    tech_count = int((searchable["match_target"] == "technosphere").sum()) if not searchable.empty else 0
+    bio_count = int((searchable["match_target"] == "biosphere").sum()) if not searchable.empty else 0
+    st.caption(
+        f"Selected for matching: {tech_count} technosphere exchange(s) + {bio_count} biosphere exchange(s)."
+    )
 
-    can_search = bool(project_name and database_name and not searchable.empty)
-    if st.button("6. Retrieve and rank ecoinvent candidates", disabled=not can_search):
+    can_search_tech = tech_count > 0 and bool(project_name and database_name)
+    can_search_bio = bio_count > 0 and bool(project_name and biosphere_database_name)
+    if tech_count > 0 and not database_name:
+        st.warning("Technosphere exchanges are selected but no technosphere database is available.")
+    if bio_count > 0 and not biosphere_database_name:
+        st.warning("Biosphere exchanges are selected but no biosphere database is available.")
+
+    if st.button(
+        "6. Retrieve and rank Brightway candidates",
+        disabled=not (can_search_tech or can_search_bio),
+    ):
         candidate_map: dict[int, list[dict]] = {}
+        candidate_targets: dict[int, str] = {}
         candidate_geographies: dict[int, str | None] = {}
         candidate_geography_sources: dict[int, str] = {}
         candidate_queries: dict[int, str] = {}
         candidate_activity_types: dict[int, str] = {}
         candidate_technology_hints: dict[int, str] = {}
+        candidate_compartments: dict[int, str] = {}
         progress = st.progress(0.0)
 
         process_map = st.session_state.get("process_map")
         searchable = searchable.reset_index(drop=True)
         for n, (_, row) in enumerate(searchable.iterrows(), start=1):
             flow_id = int(row.get("flow_id", n - 1))
-            query = initial_search_query(row)
-            geography, geography_source = search_geography(row, process_map)
-            activity_type = suggested_activity_type(row)
-            technology_hint = _text(row.get("supplier_technology_hint"))
+            target = _text(row.get("match_target"))
+            candidate_targets[flow_id] = target
             unit = _text(row.get("unit")) or None
 
-            candidate_geographies[flow_id] = geography
-            candidate_geography_sources[flow_id] = geography_source
-            candidate_queries[flow_id] = query
-            candidate_activity_types[flow_id] = activity_type
-            candidate_technology_hints[flow_id] = technology_hint
-
             try:
-                candidate_map[flow_id] = search_candidates(
-                    project_name=project_name,
-                    database_name=database_name,
-                    query=query,
-                    location_hint=geography,
-                    limit=candidate_limit,
-                    unit=unit,
-                    activity_type_hint=activity_type,
-                    technology_hint=technology_hint or None,
-                )
+                if target == "technosphere":
+                    if not database_name:
+                        candidate_map[flow_id] = [{"error": "No technosphere database selected."}]
+                    else:
+                        query = initial_search_query(row)
+                        geography, geography_source = search_geography(row, process_map)
+                        activity_type = suggested_activity_type(row)
+                        technology_hint = _text(row.get("supplier_technology_hint"))
+
+                        candidate_queries[flow_id] = query
+                        candidate_geographies[flow_id] = geography
+                        candidate_geography_sources[flow_id] = geography_source
+                        candidate_activity_types[flow_id] = activity_type
+                        candidate_technology_hints[flow_id] = technology_hint
+
+                        candidate_map[flow_id] = search_candidates(
+                            project_name=project_name,
+                            database_name=database_name,
+                            query=query,
+                            location_hint=geography,
+                            limit=candidate_limit,
+                            unit=unit,
+                            activity_type_hint=activity_type,
+                            technology_hint=technology_hint or None,
+                        )
+                elif target == "biosphere":
+                    if not biosphere_database_name:
+                        candidate_map[flow_id] = [{"error": "No biosphere database selected."}]
+                    else:
+                        query = initial_biosphere_query(row)
+                        compartment = _text(row.get("biosphere_compartment_hint"))
+                        candidate_queries[flow_id] = query
+                        candidate_compartments[flow_id] = compartment
+                        candidate_map[flow_id] = search_biosphere_candidates(
+                            project_name=project_name,
+                            database_name=biosphere_database_name,
+                            query=query,
+                            limit=candidate_limit,
+                            unit=unit,
+                            compartment_hint=compartment or None,
+                        )
             except Exception as exc:
                 candidate_map[flow_id] = [{"error": str(exc)}]
             progress.progress(n / max(len(searchable), 1))
 
         st.session_state["candidates"] = candidate_map
+        st.session_state["candidate_targets"] = candidate_targets
         st.session_state["candidate_geographies"] = candidate_geographies
         st.session_state["candidate_geography_sources"] = candidate_geography_sources
         st.session_state["candidate_queries"] = candidate_queries
         st.session_state["candidate_activity_types"] = candidate_activity_types
         st.session_state["candidate_technology_hints"] = candidate_technology_hints
+        st.session_state["candidate_compartments"] = candidate_compartments
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
-    st.subheader("7. Review real ecoinvent candidates")
+    st.subheader("7. Review Brightway candidates")
     st.caption(
-        "Manual search controls change retrieval only. They never rewrite the evidence-backed foreground exchange. "
-        "The highest-ranked candidate is pre-selected but remains subject to your approval."
+        "Source-supported exact/proxy mappings may be preselected. Search-only results are preselected only when the match is strong and unambiguous; otherwise the default is no selection."
     )
 
     inv_df = st.session_state["inventory_df"]
     mapping_rows = []
+    candidate_targets = st.session_state.get("candidate_targets", {})
     candidate_geographies = st.session_state.get("candidate_geographies", {})
     candidate_geography_sources = st.session_state.get("candidate_geography_sources", {})
     candidate_queries = st.session_state.setdefault("candidate_queries", {})
     candidate_activity_types = st.session_state.setdefault("candidate_activity_types", {})
     candidate_technology_hints = st.session_state.setdefault("candidate_technology_hints", {})
+    candidate_compartments = st.session_state.setdefault("candidate_compartments", {})
 
     for flow_id, candidates in list(st.session_state["candidates"].items()):
         matching = inv_df[inv_df["flow_id"] == flow_id]
@@ -490,21 +609,145 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
             continue
 
         row = matching.iloc[0]
+        target = candidate_targets.get(flow_id, _text(row.get("match_target")))
         flow_name = _text(row.get("name")) or f"Flow {flow_id}"
         process_name = _text(row.get("process_name")) or "Unknown process"
         stage = _text(row.get("component_or_stage"))
         unit = _text(row.get("unit"))
+        amount = row.get("amount")
+        direction = _text(row.get("direction"))
+        basis = _text(row.get("basis"))
+        interpretation_reason = _text(row.get("interpretation_reason"))
+
+        if target == "biosphere":
+            st.markdown(f"### {flow_name} — biosphere")
+            context_bits = [f"Foreground process: {process_name}"]
+            if stage:
+                context_bits.append(f"stage: {stage}")
+            if unit:
+                context_bits.append(f"unit: {unit}")
+            if direction:
+                context_bits.append(f"direction: {direction}")
+            st.caption(" | ".join(context_bits))
+            if interpretation_reason:
+                st.caption(f"Why: {interpretation_reason}")
+
+            current_query = candidate_queries.get(flow_id, initial_biosphere_query(row))
+            current_compartment = candidate_compartments.get(
+                flow_id, _text(row.get("biosphere_compartment_hint"))
+            )
+            query_col, compartment_col, search_col = st.columns([5, 3, 1.5])
+            with query_col:
+                edited_query = st.text_input(
+                    "Biosphere search query",
+                    value=current_query,
+                    key=f"bio_search_query_{flow_id}",
+                    help="Searches elementary flows in the selected biosphere database; it does not alter the foreground exchange.",
+                )
+            with compartment_col:
+                edited_compartment = st.text_input(
+                    "Compartment hint",
+                    value=current_compartment,
+                    key=f"bio_compartment_{flow_id}",
+                    help="Optional source-derived compartment/subcompartment such as air, water, soil or natural resource.",
+                )
+            with search_col:
+                st.write("")
+                st.write("")
+                search_again = st.button(
+                    "Search again",
+                    key=f"bio_search_again_{flow_id}",
+                    use_container_width=True,
+                    disabled=not bool(project_name and biosphere_database_name and edited_query.strip()),
+                )
+
+            if search_again:
+                candidate_queries[flow_id] = edited_query.strip()
+                candidate_compartments[flow_id] = edited_compartment.strip()
+                try:
+                    st.session_state["candidates"][flow_id] = search_biosphere_candidates(
+                        project_name=project_name,
+                        database_name=biosphere_database_name,
+                        query=edited_query.strip(),
+                        limit=candidate_limit,
+                        unit=unit or None,
+                        compartment_hint=edited_compartment.strip() or None,
+                    )
+                except Exception as exc:
+                    st.session_state["candidates"][flow_id] = [{"error": str(exc)}]
+                st.session_state["candidate_queries"] = candidate_queries
+                st.session_state["candidate_compartments"] = candidate_compartments
+                st.session_state.pop(f"mapping_{flow_id}", None)
+                st.rerun()
+
+            current_query = candidate_queries.get(flow_id, current_query)
+            current_compartment = candidate_compartments.get(flow_id, current_compartment)
+
+            if not candidates:
+                st.warning("No biosphere candidates returned. Edit the search controls above and search again.")
+                continue
+            if "error" in candidates[0]:
+                st.error(candidates[0]["error"])
+                continue
+
+            display = pd.DataFrame(candidates)
+            display.insert(0, "rank", range(1, len(display) + 1))
+            display_columns = ["rank", "match_score", "name", "categories", "unit", "match_reasons"]
+            st.dataframe(
+                display[[column for column in display_columns if column in display.columns]],
+                width="stretch",
+                hide_index=True,
+            )
+
+            labels = [
+                f"{candidate['name']} | {candidate.get('categories', '')} | {candidate.get('unit', '')}"
+                for candidate in candidates
+            ]
+            no_selection = "— no selection —"
+            recommended_index, recommendation_reason = recommended_candidate_index(
+                candidates,
+                target="biosphere",
+            )
+            st.caption(recommendation_reason)
+            select_index = recommended_index if recommended_index is not None else len(labels)
+            choice = st.selectbox(
+                "Approve biosphere mapping",
+                labels + [no_selection],
+                index=select_index,
+                key=f"mapping_{flow_id}",
+            )
+
+            if choice != no_selection:
+                chosen = candidates[labels.index(choice)]
+                mapping_rows.append(
+                    {
+                        "mapping_target": "biosphere",
+                        "flow_id": flow_id,
+                        "flow_name": flow_name,
+                        "foreground_amount": amount,
+                        "foreground_unit": unit,
+                        "direction": direction,
+                        "basis": basis,
+                        "component_or_stage": stage,
+                        "process_name": process_name,
+                        "search_query": current_query,
+                        "compartment_hint": current_compartment,
+                        **chosen,
+                    }
+                )
+            continue
+
+        # Technosphere candidate review
+        st.markdown(f"### {flow_name} — technosphere")
         explicit_activity_hint = _text(row.get("ecoinvent_activity_hint"))
         explicit_location_hint = _text(row.get("ecoinvent_location_hint"))
         mapping_relation = _text(row.get("background_mapping_relation"))
         mapping_rationale = _text(row.get("background_mapping_rationale"))
         source_technology_hint = _text(row.get("supplier_technology_hint"))
         exchange_provenance = _text(row.get("exchange_geography_hint"))
-        interpretation_reason = _text(row.get("interpretation_reason"))
         geography = candidate_geographies.get(flow_id)
         geography_source = candidate_geography_sources.get(flow_id, "foreground operating context")
 
-        st.markdown(f"### {flow_name}")
         context_bits = [f"Foreground process: {process_name}"]
         if stage:
             context_bits.append(f"stage: {stage}")
@@ -599,7 +842,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
         current_technology_hint = candidate_technology_hints.get(flow_id, current_technology_hint)
 
         if not candidates:
-            st.warning("No candidates returned. Edit the search controls above and search again.")
+            st.warning("No technosphere candidates returned. Edit the search controls above and search again.")
             continue
         if "error" in candidates[0]:
             st.error(candidates[0]["error"])
@@ -628,20 +871,32 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
             for candidate in candidates
         ]
         no_selection = "— no selection —"
+        recommended_index, recommendation_reason = recommended_candidate_index(
+            candidates,
+            source_activity_hint=explicit_activity_hint or None,
+            mapping_relation=mapping_relation or None,
+            target="technosphere",
+        )
+        st.caption(recommendation_reason)
+        select_index = recommended_index if recommended_index is not None else len(labels)
         choice = st.selectbox(
-            "Approve mapping",
+            "Approve technosphere mapping",
             labels + [no_selection],
-            index=0,
+            index=select_index,
             key=f"mapping_{flow_id}",
-            help="Highest-ranked candidate is pre-selected. Change it or choose no selection if needed.",
         )
 
         if choice != no_selection:
             chosen = candidates[labels.index(choice)]
             mapping_rows.append(
                 {
+                    "mapping_target": "technosphere",
                     "flow_id": flow_id,
                     "flow_name": flow_name,
+                    "foreground_amount": amount,
+                    "foreground_unit": unit,
+                    "direction": direction,
+                    "basis": basis,
                     "component_or_stage": stage,
                     "process_name": process_name,
                     "source_activity_hint": explicit_activity_hint,
@@ -658,11 +913,31 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
 
     if mapping_rows:
         mapping_df = pd.DataFrame(mapping_rows)
-        st.subheader("Approved mappings")
+        st.subheader("Approved Brightway mappings")
         st.dataframe(mapping_df, width="stretch", hide_index=True)
         st.download_button(
-            "Download approved mappings CSV",
+            "Download all approved Brightway mappings",
             mapping_df.to_csv(index=False).encode("utf-8"),
-            file_name="approved_ecoinvent_mappings.csv",
+            file_name="approved_brightway_mappings.csv",
             mime="text/csv",
         )
+
+        technosphere_df = mapping_df[mapping_df["mapping_target"] == "technosphere"]
+        biosphere_df = mapping_df[mapping_df["mapping_target"] == "biosphere"]
+        col1, col2 = st.columns(2)
+        with col1:
+            if not technosphere_df.empty:
+                st.download_button(
+                    "Download approved ecoinvent mappings",
+                    technosphere_df.to_csv(index=False).encode("utf-8"),
+                    file_name="approved_ecoinvent_mappings.csv",
+                    mime="text/csv",
+                )
+        with col2:
+            if not biosphere_df.empty:
+                st.download_button(
+                    "Download approved biosphere mappings",
+                    biosphere_df.to_csv(index=False).encode("utf-8"),
+                    file_name="approved_biosphere_mappings.csv",
+                    mime="text/csv",
+                )
