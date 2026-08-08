@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from ai_lca.documents import extract_pdf_text
+from ai_lca.documents import extract_docx_text, extract_pdf_text
 from ai_lca.llm import extract_inventory_from_text, extract_process_map_from_text
 from ai_lca.export import dataframe_to_json, extraction_to_dataframe, process_map_to_dataframe
 from ai_lca.brightway_search import list_databases, search_candidates
@@ -16,11 +16,20 @@ st.set_page_config(page_title="AI-LCA Foreground Builder", layout="wide")
 st.title("AI-LCA Foreground Builder")
 st.caption("AI maps the paper → human confirms foreground processes → AI extracts exchanges → human approves → Brightway calculates")
 
+
+def process_geography(process_map, process_id: str) -> str | None:
+    """Return process geography, falling back to the source-wide study geography."""
+    for group in process_map.technology_groups:
+        for process in group.processes:
+            if process.process_id == process_id:
+                return process.geographic_context or process_map.geographic_context
+    return process_map.geographic_context
+
+
 with st.sidebar:
     st.header("Configuration")
     model = st.text_input("OpenAI model", value=os.getenv("OPENAI_MODEL", "gpt-5-mini"))
     project_name = st.text_input("Brightway project", value=os.getenv("BRIGHTWAY_PROJECT", ""))
-    locations_text = st.text_input("Preferred ecoinvent locations", value="GB,RER,GLO,RoW")
     candidate_limit = st.slider("Candidates per flow", 3, 20, 8)
 
     database_name = ""
@@ -35,7 +44,7 @@ with st.sidebar:
         except Exception as exc:
             st.warning(f"Brightway project not available yet: {exc}")
 
-paste_tab, pdf_tab = st.tabs(["Paste text", "Upload PDF"])
+paste_tab, upload_tab = st.tabs(["Paste text", "Upload document"])
 
 with paste_tab:
     pasted_text = st.text_area(
@@ -44,15 +53,31 @@ with paste_tab:
         placeholder="Paste the relevant source material here…",
     )
 
-with pdf_tab:
-    uploaded_pdf = st.file_uploader("Upload a text-readable PDF", type=["pdf"])
-    pdf_preview = ""
-    if uploaded_pdf is not None:
+with upload_tab:
+    uploaded_document = st.file_uploader(
+        "Upload a PDF or Word document",
+        type=["pdf", "docx"],
+        help="PDF text is retained with page markers. Word (.docx) paragraphs and tables are retained in document order.",
+    )
+    document_preview = ""
+    if uploaded_document is not None:
         try:
-            pdf_preview = extract_pdf_text(uploaded_pdf.getvalue())
-            st.success(f"Extracted machine-readable text from PDF ({len(pdf_preview):,} characters).")
-            with st.expander("Preview extracted text"):
-                st.text(pdf_preview[:12000])
+            filename = uploaded_document.name.lower()
+            document_bytes = uploaded_document.getvalue()
+            if filename.endswith(".pdf"):
+                document_preview = extract_pdf_text(document_bytes)
+                document_kind = "PDF"
+            elif filename.endswith(".docx"):
+                document_preview = extract_docx_text(document_bytes)
+                document_kind = "Word document"
+            else:
+                raise ValueError("Unsupported document type. Upload PDF or .docx.")
+
+            st.success(
+                f"Extracted readable content from {document_kind} ({len(document_preview):,} characters)."
+            )
+            with st.expander("Preview extracted content"):
+                st.text(document_preview[:12000])
         except Exception as exc:
             st.error(str(exc))
 
@@ -62,7 +87,7 @@ extra_instructions = st.text_area(
     height=90,
 )
 
-source_text = pasted_text.strip() or pdf_preview.strip()
+source_text = pasted_text.strip() or document_preview.strip()
 
 if st.button("1. Analyse paper structure", type="primary", disabled=not bool(source_text)):
     try:
@@ -77,6 +102,7 @@ if st.button("1. Analyse paper structure", type="primary", disabled=not bool(sou
         st.session_state.pop("extraction", None)
         st.session_state.pop("inventory_df", None)
         st.session_state.pop("candidates", None)
+        st.session_state.pop("candidate_geographies", None)
     except Exception as exc:
         st.exception(exc)
 
@@ -84,7 +110,7 @@ if "process_map" in st.session_state:
     process_map = st.session_state["process_map"]
     st.subheader("Review AI foreground interpretation")
     st.caption(
-        "Only paper-supported foreground processes are listed as processes. Engineering steps shown under Operations are context only and will not become separate Brightway activities or ecoinvent searches."
+        "Only paper-supported foreground processes are listed as processes. Engineering steps shown under Operations are context only and will not become separate Brightway activities or ecoinvent searches. Geography is taken from the source rather than entered manually."
     )
 
     meta1, meta2, meta3, meta4 = st.columns(4)
@@ -108,8 +134,12 @@ if "process_map" in st.session_state:
                 context_bits = []
                 if process.geographic_context:
                     context_bits.append(f"geography: {process.geographic_context}")
+                elif process_map.geographic_context:
+                    context_bits.append(f"geography: {process_map.geographic_context} (study-wide)")
                 if process.temporal_context:
                     context_bits.append(f"time: {process.temporal_context}")
+                elif process_map.temporal_context:
+                    context_bits.append(f"time: {process_map.temporal_context} (study-wide)")
                 if context_bits:
                     st.caption(" | ".join(context_bits))
                 st.write(process.reason_for_separate_process)
@@ -160,6 +190,7 @@ if "process_map" in st.session_state:
                 "process_id": st.column_config.TextColumn("Process ID", width="small"),
                 "process_name": st.column_config.TextColumn("Foreground process", width="large"),
                 "technology_group": st.column_config.TextColumn("Technology / pathway"),
+                "geographic_context": st.column_config.TextColumn("Paper-derived geography"),
                 "operations_not_separate_processes": st.column_config.TextColumn("Operations (context only)", width="large"),
                 "reason_for_separate_process": st.column_config.TextColumn("Why this is a separate process", width="large"),
                 "evidence_text": st.column_config.TextColumn("Process evidence", width="large"),
@@ -184,6 +215,7 @@ if "process_map" in st.session_state:
             st.session_state["extraction"] = extraction
             st.session_state["inventory_df"] = extraction_to_dataframe(extraction)
             st.session_state.pop("candidates", None)
+            st.session_state.pop("candidate_geographies", None)
         except Exception as exc:
             st.exception(exc)
 
@@ -236,8 +268,8 @@ if "extraction" in st.session_state:
 
     can_search = bool(project_name and database_name)
     if st.button("3. Search ecoinvent candidates", disabled=not can_search):
-        locations = [x.strip() for x in locations_text.split(",") if x.strip()]
         candidate_map: dict[int, list[dict]] = {}
+        candidate_geographies: dict[int, str | None] = {}
         progress = st.progress(0.0)
         included = edited_df[
             (edited_df["include"] == True)  # noqa: E712
@@ -253,34 +285,48 @@ if "extraction" in st.session_state:
                 f"Skipped {len(blocked)} selected row(s) because they are not quantified foreground inputs."
             )
 
+        process_map = st.session_state.get("process_map")
         for n, (_, row) in enumerate(included.iterrows(), start=1):
             flow_id = int(row.get("flow_id", n - 1))
             query = str(row.get("name", "")).strip()
+            process_id = str(row.get("process_id", "")).strip()
+            geography = process_geography(process_map, process_id) if process_map else None
+            candidate_geographies[flow_id] = geography
             try:
                 candidate_map[flow_id] = search_candidates(
                     project_name=project_name,
                     database_name=database_name,
                     query=query,
-                    locations=locations,
+                    location_hint=geography,
                     limit=candidate_limit,
                 )
             except Exception as exc:
                 candidate_map[flow_id] = [{"error": str(exc)}]
             progress.progress(n / max(len(included), 1))
         st.session_state["candidates"] = candidate_map
+        st.session_state["candidate_geographies"] = candidate_geographies
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
     st.subheader("Candidate background processes")
-    st.caption("These are real results returned by your selected Brightway database. The prototype does not auto-approve them.")
+    st.caption(
+        "These are real results returned by your selected Brightway database. When the paper identifies an operating geography, matching locations are ranked first; no manual geography preference is used."
+    )
     mapping_rows = []
     inv_df = st.session_state["inventory_df"]
+    candidate_geographies = st.session_state.get("candidate_geographies", {})
 
     for flow_id, candidates in st.session_state["candidates"].items():
         matching = inv_df[inv_df["flow_id"] == flow_id]
         flow_name = matching.iloc[0]["name"] if not matching.empty else f"Flow {flow_id}"
         process_name = matching.iloc[0]["process_name"] if not matching.empty else "Unknown process"
+        geography = candidate_geographies.get(flow_id)
         st.markdown(f"### {flow_name}")
-        st.caption(f"Foreground process: {process_name}")
+        context = f"Foreground process: {process_name}"
+        if geography:
+            context += f" | Paper-derived geography: {geography}"
+        else:
+            context += " | Paper-derived geography: not identified"
+        st.caption(context)
 
         if not candidates:
             st.warning("No candidates returned.")
@@ -309,7 +355,15 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
         if choice != "— no selection —":
             chosen_index = labels.index(choice)
             chosen = candidates[chosen_index]
-            mapping_rows.append({"flow_id": flow_id, "flow_name": flow_name, "process_name": process_name, **chosen})
+            mapping_rows.append(
+                {
+                    "flow_id": flow_id,
+                    "flow_name": flow_name,
+                    "process_name": process_name,
+                    "paper_geography": geography,
+                    **chosen,
+                }
+            )
 
     if mapping_rows:
         mapping_df = pd.DataFrame(mapping_rows)
