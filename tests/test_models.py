@@ -27,37 +27,12 @@ def _pyrolysis_process_map() -> ProcessMap:
                             reason_for_separate_process="The combined evidence supports one foreground inventory for this pathway.",
                             confidence="high",
                             evidence=[
-                                SourceEvidence(
-                                    source_document="paper.pdf",
-                                    page=3,
-                                    evidence_text="Thermal plasma methane pyrolysis is modelled as the hydrogen production pathway.",
-                                ),
-                                SourceEvidence(
-                                    source_document="supplement.docx",
-                                    table="Table 2",
-                                    evidence_text="Inventory for thermal plasma methane pyrolysis per kg H2.",
-                                ),
+                                SourceEvidence(source_document="paper.pdf", page=3, evidence_text="Thermal plasma methane pyrolysis is modelled as the hydrogen production pathway."),
+                                SourceEvidence(source_document="supplement.docx", table="Table 2", evidence_text="Inventory for thermal plasma methane pyrolysis per kg H2."),
                             ],
                             operations=[
-                                DescribedOperation(
-                                    name="plasma generation",
-                                    evidence=[
-                                        SourceEvidence(
-                                            source_document="paper.pdf",
-                                            page=2,
-                                            evidence_text="An electric arc generates the plasma.",
-                                        )
-                                    ],
-                                ),
-                                DescribedOperation(
-                                    name="carbon separation",
-                                    evidence=[
-                                        SourceEvidence(
-                                            source_document="supplement.docx",
-                                            evidence_text="Solid carbon is separated from the product gas.",
-                                        )
-                                    ],
-                                ),
+                                DescribedOperation(name="plasma generation", evidence=[SourceEvidence(source_document="paper.pdf", page=2, evidence_text="An electric arc generates the plasma.")]),
+                                DescribedOperation(name="carbon separation", evidence=[SourceEvidence(source_document="supplement.docx", evidence_text="Solid carbon is separated from the product gas.")]),
                             ],
                         )
                     ],
@@ -84,36 +59,11 @@ def test_inventory_validation_rejects_unapproved_process_and_unsupported_voltage
         functional_unit="1 kg H2",
         source_summary="Combined evidence",
         flows=[
-            InventoryFlow(
-                process_id="p001",
-                technology_group="wrong",
-                process_name="wrong",
-                name="electricity, medium voltage",
-                amount=10.0,
-                unit="kWh",
-                direction="input",
-                flow_kind="energy",
-                basis="per kg H2",
-                evidence=[SourceEvidence(source_document="supplement.docx", evidence_text="Electricity: 10 kWh/kg H2.")],
-            ),
-            InventoryFlow(
-                process_id="p999",
-                technology_group="Methane pyrolysis",
-                process_name="Invented purification process",
-                name="electricity",
-                amount=2.0,
-                unit="kWh",
-                direction="input",
-                flow_kind="energy",
-                evidence=[SourceEvidence(evidence_text="Electricity: 2 kWh.")],
-            ),
+            InventoryFlow(process_id="p001", technology_group="wrong", process_name="wrong", name="electricity, medium voltage", amount=10.0, unit="kWh", direction="input", flow_kind="energy", basis="per kg H2", evidence=[SourceEvidence(source_document="supplement.docx", evidence_text="Electricity: 10 kWh/kg H2.")]),
+            InventoryFlow(process_id="p999", technology_group="Methane pyrolysis", process_name="Invented purification process", name="electricity", amount=2.0, unit="kWh", direction="input", flow_kind="energy", evidence=[SourceEvidence(evidence_text="Electricity: 2 kWh.")]),
         ],
     )
-    result = validate_inventory_against_process_map(
-        extraction,
-        process_map,
-        "[DOCUMENT supplement.docx]\nElectricity: 10 kWh/kg H2.",
-    )
+    result = validate_inventory_against_process_map(extraction, process_map, "[DOCUMENT supplement.docx]\nElectricity: 10 kWh/kg H2.")
     assert len(result.flows) == 1
     assert result.flows[0].name == "electricity"
     assert result.flows[0].technology_group == "Methane pyrolysis"
@@ -124,38 +74,11 @@ def test_inventory_validation_rejects_unapproved_process_and_unsupported_voltage
 
 def test_inventory_validation_rejects_detected_but_unapproved_process():
     process_map = _pyrolysis_process_map()
-    second = ForegroundProcess(
-        name="Separately modelled carbon treatment",
-        evidence_type="inventory_table",
-        reason_for_separate_process="Separate inventory table.",
-        confidence="high",
-        evidence=[SourceEvidence(page=4, evidence_text="Carbon treatment inventory.")],
-    )
+    second = ForegroundProcess(name="Separately modelled carbon treatment", evidence_type="inventory_table", reason_for_separate_process="Separate inventory table.", confidence="high", evidence=[SourceEvidence(page=4, evidence_text="Carbon treatment inventory.")])
     process_map.technology_groups[0].processes.append(second)
     process_map = normalise_process_ids(process_map)
-    extraction = InventoryExtraction(
-        functional_unit="1 kg H2",
-        source_summary="Test source",
-        flows=[
-            InventoryFlow(
-                process_id="p002",
-                technology_group="Methane pyrolysis",
-                process_name="Separately modelled carbon treatment",
-                name="electricity",
-                amount=1.0,
-                unit="kWh",
-                direction="input",
-                flow_kind="energy",
-                evidence=[SourceEvidence(evidence_text="Electricity: 1 kWh.")],
-            )
-        ],
-    )
-    result = validate_inventory_against_process_map(
-        extraction,
-        process_map,
-        "Electricity: 1 kWh.",
-        allowed_process_ids={"p001"},
-    )
+    extraction = InventoryExtraction(source_summary="Test source", flows=[InventoryFlow(process_id="p002", technology_group="Methane pyrolysis", process_name="Separately modelled carbon treatment", name="electricity", amount=1.0, unit="kWh", direction="input", flow_kind="energy", evidence=[SourceEvidence(evidence_text="Electricity: 1 kWh.")])])
+    result = validate_inventory_against_process_map(extraction, process_map, "Electricity: 1 kWh.", allowed_process_ids={"p001"})
     assert result.flows == []
     assert any("unapproved process ID 'p002'" in warning for warning in result.assumptions_or_warnings)
 
@@ -167,39 +90,9 @@ def test_only_quantified_inputs_default_to_background_matching():
         functional_unit="1 kg H2",
         source_summary="Test source",
         flows=[
-            InventoryFlow(
-                process_id=process.process_id,
-                technology_group="Methane pyrolysis",
-                process_name=process.name,
-                name="natural gas",
-                amount=4.0,
-                unit="kg",
-                direction="input",
-                flow_kind="material",
-                evidence=[SourceEvidence(evidence_text="Natural gas: 4 kg.")],
-            ),
-            InventoryFlow(
-                process_id=process.process_id,
-                technology_group="Methane pyrolysis",
-                process_name=process.name,
-                name="hydrogen",
-                amount=1.0,
-                unit="kg",
-                direction="output",
-                flow_kind="product",
-                evidence=[SourceEvidence(evidence_text="Hydrogen output: 1 kg.")],
-            ),
-            InventoryFlow(
-                process_id=process.process_id,
-                technology_group="Methane pyrolysis",
-                process_name=process.name,
-                name="graphite electrode",
-                amount=None,
-                unit="kg",
-                direction="input",
-                flow_kind="material",
-                evidence=[SourceEvidence(evidence_text="Graphite electrodes are consumed.")],
-            ),
+            InventoryFlow(process_id=process.process_id, technology_group="Methane pyrolysis", process_name=process.name, name="natural gas", amount=4.0, unit="kg", direction="input", flow_kind="material", evidence=[SourceEvidence(evidence_text="Natural gas: 4 kg.")]),
+            InventoryFlow(process_id=process.process_id, technology_group="Methane pyrolysis", process_name=process.name, name="hydrogen", amount=1.0, unit="kg", direction="output", flow_kind="product", evidence=[SourceEvidence(evidence_text="Hydrogen output: 1 kg.")]),
+            InventoryFlow(process_id=process.process_id, technology_group="Methane pyrolysis", process_name=process.name, name="graphite electrode", amount=None, unit="kg", direction="input", flow_kind="material", evidence=[SourceEvidence(evidence_text="Graphite electrodes are consumed.")]),
         ],
     )
     df = extraction_to_dataframe(extraction)
@@ -210,26 +103,7 @@ def test_only_quantified_inputs_default_to_background_matching():
 def test_one_flow_can_be_supported_across_multiple_documents():
     process_map = _pyrolysis_process_map()
     process = process_map.technology_groups[0].processes[0]
-    extraction = InventoryExtraction(
-        source_summary="Combined evidence",
-        flows=[
-            InventoryFlow(
-                process_id=process.process_id,
-                technology_group="Methane pyrolysis",
-                process_name=process.name,
-                name="electricity",
-                amount=10.0,
-                unit="kWh",
-                direction="input",
-                flow_kind="energy",
-                basis="per kg H2",
-                evidence=[
-                    SourceEvidence(source_document="paper.pdf", page=5, evidence_text="The plasma reactor is electrically heated."),
-                    SourceEvidence(source_document="supplement.docx", table="Table S3", evidence_text="Electricity | 10 kWh/kg H2"),
-                ],
-            )
-        ],
-    )
+    extraction = InventoryExtraction(source_summary="Combined evidence", flows=[InventoryFlow(process_id=process.process_id, technology_group="Methane pyrolysis", process_name=process.name, name="electricity", amount=10.0, unit="kWh", direction="input", flow_kind="energy", basis="per kg H2", evidence=[SourceEvidence(source_document="paper.pdf", page=5, evidence_text="The plasma reactor is electrically heated."), SourceEvidence(source_document="supplement.docx", table="Table S3", evidence_text="Electricity | 10 kWh/kg H2")])])
     df = extraction_to_dataframe(extraction)
     assert len(df) == 1
     assert "paper.pdf" in df.iloc[0]["source_documents"]
@@ -242,28 +116,8 @@ def test_plant_construction_context_is_removed_from_flow_and_search_name():
     extraction = InventoryExtraction(
         source_summary="Hermesmann-style construction inventory",
         flows=[
-            InventoryFlow(
-                process_id=process.process_id,
-                technology_group="Methane pyrolysis",
-                process_name=process.name,
-                name="concrete (plant construction)",
-                amount=6.6e-6,
-                unit="m3",
-                direction="input",
-                flow_kind="material",
-                evidence=[SourceEvidence(source_document="paper.pdf", table="Table 2", evidence_text="Concrete m3 6.60e-06")],
-            ),
-            InventoryFlow(
-                process_id=process.process_id,
-                technology_group="Methane pyrolysis",
-                process_name=process.name,
-                name="aluminum (plant construction)",
-                amount=4.17e-5,
-                unit="kg",
-                direction="input",
-                flow_kind="material",
-                evidence=[SourceEvidence(source_document="paper.pdf", table="Table 2", evidence_text="Aluminum kg 4.17e-05")],
-            ),
+            InventoryFlow(process_id=process.process_id, technology_group="Methane pyrolysis", process_name=process.name, name="concrete (plant construction)", amount=6.6e-6, unit="m3", direction="input", flow_kind="material", evidence=[SourceEvidence(source_document="paper.pdf", table="Table 2", evidence_text="Concrete m3 6.60e-06")]),
+            InventoryFlow(process_id=process.process_id, technology_group="Methane pyrolysis", process_name=process.name, name="aluminum (plant construction)", amount=4.17e-5, unit="kg", direction="input", flow_kind="material", evidence=[SourceEvidence(source_document="paper.pdf", table="Table 2", evidence_text="Aluminum kg 4.17e-05")]),
         ],
     )
     result = validate_inventory_against_process_map(extraction, process_map, "")
@@ -295,13 +149,7 @@ def test_explicit_background_mapping_is_kept_separate_from_foreground_quantity()
                 ecoinvent_activity_hint="Market for concrete, normal",
                 ecoinvent_location_hint="RoW",
                 evidence=[SourceEvidence(source_document="paper.pdf", table="Table 2", evidence_text="Concrete m3 6.60e-06")],
-                background_mapping_evidence=[
-                    SourceEvidence(
-                        source_document="supplement.docx",
-                        table="Table S1",
-                        evidence_text="Concrete | Market for concrete, normal | RoW | m3",
-                    )
-                ],
+                background_mapping_evidence=[SourceEvidence(source_document="supplement.docx", table="Table S1", evidence_text="Concrete | Market for concrete, normal | RoW | m3")],
             )
         ],
     )
