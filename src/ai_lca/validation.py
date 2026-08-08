@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import re
+
 from .models import InventoryExtraction, ProcessMap
 
 
 ELECTRICITY_VOLTAGE_QUALIFIERS = ("low voltage", "medium voltage", "high voltage")
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
+CONTEXTUAL_SUFFIX_TERMS = (
+    "plant construction",
+    "plant manufacturing",
+    "construction",
+    "capital input",
+    "capital inputs",
+    "capital equipment",
+    "for electricity recovery",
+    "for energy recovery",
+)
+TRAILING_PARENTHETICAL = re.compile(r"\s*\(([^()]*)\)\s*$")
 
 
 def _normalise_name(value: str | None) -> str:
@@ -34,6 +47,31 @@ def _merge_evidence(target: list, incoming: list) -> None:
         if key not in seen:
             target.append(evidence)
             seen.add(key)
+
+
+def _strip_contextual_suffix(value: str | None) -> tuple[str, str | None]:
+    """Remove trailing lifecycle/context parentheticals, preserving chemically meaningful qualifiers."""
+    cleaned = " ".join((value or "").split()).strip()
+    removed: list[str] = []
+    while cleaned:
+        match = TRAILING_PARENTHETICAL.search(cleaned)
+        if not match:
+            break
+        content = match.group(1).strip()
+        lowered = content.casefold()
+        if not any(term in lowered for term in CONTEXTUAL_SUFFIX_TERMS):
+            break
+        removed.append(content)
+        cleaned = cleaned[: match.start()].strip()
+    return cleaned, "; ".join(reversed(removed)) or None
+
+
+def _clean_search_term(value: str | None, fallback: str) -> str:
+    cleaned, _ = _strip_contextual_suffix(value or fallback)
+    # ecoinvent generally uses British spelling; this affects only retrieval, not source wording.
+    if cleaned.casefold() == "aluminum":
+        return "aluminium"
+    return cleaned
 
 
 def normalise_process_ids(process_map: ProcessMap) -> ProcessMap:
@@ -123,7 +161,7 @@ def validate_inventory_against_process_map(
     source_text: str,
     allowed_process_ids: set[str] | None = None,
 ) -> InventoryExtraction:
-    """Prevent invented/unapproved flows and merge repeated cross-document evidence."""
+    """Prevent invented/unapproved flows, clean search concepts, and merge cross-document evidence."""
     result = extraction.model_copy(deep=True)
     index = process_index(process_map)
     if allowed_process_ids is not None:
@@ -151,6 +189,21 @@ def validate_inventory_against_process_map(
         flow.technology_group = technology_group
         flow.process_name = process.name
 
+        original_name = flow.name
+        clean_name, removed_context = _strip_contextual_suffix(flow.name)
+        if clean_name and clean_name != flow.name:
+            flow.name = clean_name
+            if removed_context and not flow.component_or_stage:
+                flow.component_or_stage = removed_context
+            note = (
+                f"Removed lifecycle/context qualifier from exchange name '{original_name}'; "
+                f"canonical exchange is '{flow.name}'."
+            )
+            flow.notes = f"{flow.notes}; {note}" if flow.notes else note
+            warnings.append(note)
+
+        flow.ecoinvent_search_term = _clean_search_term(flow.ecoinvent_search_term, flow.name)
+
         flow_name_lower = flow.name.lower()
         evidence_lower = " ".join(e.evidence_text for e in flow.evidence).lower()
         if "electricity" in flow_name_lower:
@@ -158,13 +211,22 @@ def validate_inventory_against_process_map(
                 if qualifier in flow_name_lower and qualifier not in evidence_lower:
                     original_name = flow.name
                     flow.name = "electricity"
+                    flow.ecoinvent_search_term = "electricity"
                     note = (
                         f"Removed unsupported voltage-level qualifier from '{original_name}'; "
-                        "the evidence cited for this flow does not state that voltage level."
+                        "the evidence cited for the foreground quantity does not state that voltage level."
                     )
                     flow.notes = f"{flow.notes}; {note}" if flow.notes else note
                     warnings.append(note)
                     break
+
+        # An exact activity hint is usable only when it has separate source evidence.
+        if flow.ecoinvent_activity_hint and not flow.background_mapping_evidence:
+            warnings.append(
+                f"Removed unsupported ecoinvent activity hint '{flow.ecoinvent_activity_hint}' for flow '{flow.name}' because no mapping evidence was supplied."
+            )
+            flow.ecoinvent_activity_hint = None
+            flow.ecoinvent_location_hint = None
 
         key = (
             flow.process_id,
@@ -177,10 +239,16 @@ def validate_inventory_against_process_map(
         if key in seen:
             existing = validated[seen[key]]
             _merge_evidence(existing.evidence, flow.evidence)
+            _merge_evidence(existing.background_mapping_evidence, flow.background_mapping_evidence)
             if not existing.operation_context and flow.operation_context:
                 existing.operation_context = flow.operation_context
             if not existing.component_or_stage and flow.component_or_stage:
                 existing.component_or_stage = flow.component_or_stage
+            if not existing.source_label and flow.source_label:
+                existing.source_label = flow.source_label
+            if not existing.ecoinvent_activity_hint and flow.ecoinvent_activity_hint:
+                existing.ecoinvent_activity_hint = flow.ecoinvent_activity_hint
+                existing.ecoinvent_location_hint = flow.ecoinvent_location_hint
             if flow.notes and flow.notes not in (existing.notes or ""):
                 existing.notes = f"{existing.notes}; {flow.notes}" if existing.notes else flow.notes
             warnings.append(
