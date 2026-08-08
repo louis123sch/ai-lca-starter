@@ -11,7 +11,7 @@ class SourceEvidence(BaseModel):
 
     source_document: str | None = Field(
         default=None,
-        description="Filename from the nearest [DOCUMENT ...] marker when multiple source documents are supplied.",
+        description="Filename from the nearest [DOCUMENT ...] marker when an evidence corpus is supplied.",
     )
     page: int | None = Field(
         default=None,
@@ -25,21 +25,20 @@ class SourceEvidence(BaseModel):
 
 
 class DescribedOperation(BaseModel):
-    """An engineering operation described inside a foreground process.
-
-    Operations are explanatory context. They must not become separate foreground
-    activities unless the paper separately models them as such.
-    """
+    """An engineering operation described inside a foreground process."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
     notes: str | None = None
-    evidence: SourceEvidence
+    evidence: list[SourceEvidence] = Field(
+        default_factory=list,
+        description="Evidence from one or more uploaded documents supporting this operation.",
+    )
 
 
 class ForegroundProcess(BaseModel):
-    """A process that the source LCA itself models as a distinct foreground unit."""
+    """A process that the evidence corpus supports as a distinct foreground unit."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -50,7 +49,7 @@ class ForegroundProcess(BaseModel):
     name: str
     geographic_context: str | None = Field(
         default=None,
-        description="Intended operating/model geography when supported by the source.",
+        description="Intended operating/model geography when supported by the evidence corpus.",
     )
     temporal_context: str | None = Field(
         default=None,
@@ -64,10 +63,13 @@ class ForegroundProcess(BaseModel):
         "explicit_text",
     ]
     reason_for_separate_process: str = Field(
-        description="Why the source supports treating this as a distinct LCA foreground process."
+        description="Why the combined evidence supports treating this as a distinct LCA foreground process."
     )
     confidence: Literal["high", "medium", "low"] = "medium"
-    evidence: list[SourceEvidence] = Field(default_factory=list)
+    evidence: list[SourceEvidence] = Field(
+        default_factory=list,
+        description="Evidence may come from several uploaded documents and should be combined when they support the same process.",
+    )
     operations: list[DescribedOperation] = Field(default_factory=list)
 
 
@@ -82,14 +84,14 @@ class TechnologyGroup(BaseModel):
 
 
 class ProcessMap(BaseModel):
-    """Evidence-backed map of the foreground process structure represented in a source."""
+    """Evidence-backed foreground process structure inferred across the full document corpus."""
 
     model_config = ConfigDict(extra="forbid")
 
     source_summary: str
     functional_unit: str | None = Field(
         default=None,
-        description="Functional unit only if explicitly stated or clearly defined in supplied text.",
+        description="Functional unit only if explicitly stated or clearly defined in the supplied evidence corpus.",
     )
     system_boundary: str | None = None
     geographic_context: str | None = Field(
@@ -112,7 +114,7 @@ class InventoryFlow(BaseModel):
     name: str = Field(description="Plain-language material, energy, transport, emission, or product flow.")
     amount: float | None = Field(
         default=None,
-        description="Numeric quantity exactly supported by the supplied document; null if no quantity is stated.",
+        description="Numeric quantity supported by the evidence corpus; null if no quantity is stated.",
     )
     unit: str | None = Field(default=None, description="Unit exactly as stated or unambiguously normalised.")
     direction: Literal["input", "output", "emission", "unknown"] = "unknown"
@@ -136,7 +138,10 @@ class InventoryFlow(BaseModel):
         description="Basis/denominator, e.g. per kg H2, per year, per electrolyser, per functional unit.",
     )
     notes: str | None = None
-    evidence: SourceEvidence
+    evidence: list[SourceEvidence] = Field(
+        default_factory=list,
+        description="All relevant supporting evidence across the uploaded document corpus. Multiple documents may jointly support one flow.",
+    )
 
 
 class InventoryExtraction(BaseModel):
@@ -146,8 +151,8 @@ class InventoryExtraction(BaseModel):
 
     functional_unit: str | None = Field(
         default=None,
-        description="Functional unit only if explicitly stated or clearly defined in supplied text.",
+        description="Functional unit only if explicitly stated or clearly defined in supplied evidence.",
     )
-    source_summary: str = Field(description="One-sentence description of what source material was analysed.")
+    source_summary: str = Field(description="One-sentence description of the evidence corpus analysed.")
     assumptions_or_warnings: list[str] = Field(default_factory=list)
     flows: list[InventoryFlow] = Field(default_factory=list)
