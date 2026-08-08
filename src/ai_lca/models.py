@@ -19,9 +19,7 @@ class SourceEvidence(BaseModel):
     )
     section: str | None = None
     table: str | None = None
-    evidence_text: str = Field(
-        description="Short verbatim evidence supporting the extracted item."
-    )
+    evidence_text: str = Field(description="Short verbatim evidence supporting the extracted item.")
 
 
 class DescribedOperation(BaseModel):
@@ -31,10 +29,7 @@ class DescribedOperation(BaseModel):
 
     name: str
     notes: str | None = None
-    evidence: list[SourceEvidence] = Field(
-        default_factory=list,
-        description="Evidence from one or more uploaded documents supporting this operation.",
-    )
+    evidence: list[SourceEvidence] = Field(default_factory=list)
 
 
 class ForegroundProcess(BaseModel):
@@ -42,19 +37,10 @@ class ForegroundProcess(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    process_id: str = Field(
-        default="",
-        description="Stable internal ID; normalised by the application after extraction.",
-    )
+    process_id: str = Field(default="")
     name: str
-    geographic_context: str | None = Field(
-        default=None,
-        description="Intended operating/model geography when supported by the evidence corpus.",
-    )
-    temporal_context: str | None = Field(
-        default=None,
-        description="Year, study period, scenario year, or other time context when supported.",
-    )
+    geographic_context: str | None = None
+    temporal_context: str | None = None
     evidence_type: Literal[
         "inventory_table",
         "system_boundary_figure",
@@ -62,14 +48,9 @@ class ForegroundProcess(BaseModel):
         "explicit_process_link",
         "explicit_text",
     ]
-    reason_for_separate_process: str = Field(
-        description="Why the combined evidence supports treating this as a distinct LCA foreground process."
-    )
+    reason_for_separate_process: str
     confidence: Literal["high", "medium", "low"] = "medium"
-    evidence: list[SourceEvidence] = Field(
-        default_factory=list,
-        description="Evidence may come from several uploaded documents and should be combined when they support the same process.",
-    )
+    evidence: list[SourceEvidence] = Field(default_factory=list)
     operations: list[DescribedOperation] = Field(default_factory=list)
 
 
@@ -89,15 +70,9 @@ class ProcessMap(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_summary: str
-    functional_unit: str | None = Field(
-        default=None,
-        description="Functional unit only if explicitly stated or clearly defined in the supplied evidence corpus.",
-    )
+    functional_unit: str | None = None
     system_boundary: str | None = None
-    geographic_context: str | None = Field(
-        default=None,
-        description="Overall study/model geography, not an inferred electricity-market geography.",
-    )
+    geographic_context: str | None = None
     temporal_context: str | None = None
     assumptions_or_warnings: list[str] = Field(default_factory=list)
     technology_groups: list[TechnologyGroup] = Field(default_factory=list)
@@ -113,19 +88,13 @@ class InventoryFlow(BaseModel):
     process_name: str
     name: str = Field(
         description=(
-            "Canonical bare exchange concept only, e.g. 'concrete', 'steel', 'aluminium', "
-            "'natural gas'. Do not append lifecycle-stage labels such as '(plant construction)'."
+            "Canonical bare exchange concept only, e.g. concrete, steel, aluminium, natural gas. "
+            "Do not append lifecycle-stage labels such as plant construction."
         )
     )
-    source_label: str | None = Field(
-        default=None,
-        description="The concise wording used for this flow in the quantitative inventory source, e.g. 'Aluminum'.",
-    )
-    amount: float | None = Field(
-        default=None,
-        description="Numeric quantity supported by the evidence corpus; null if no quantity is stated.",
-    )
-    unit: str | None = Field(default=None, description="Unit exactly as stated or unambiguously normalised.")
+    source_label: str | None = None
+    amount: float | None = None
+    unit: str | None = None
     direction: Literal["input", "output", "emission", "unknown"] = "unknown"
     flow_kind: Literal[
         "material",
@@ -137,45 +106,38 @@ class InventoryFlow(BaseModel):
         "emission",
         "other",
     ] = "other"
-    operation_context: str | None = Field(
-        default=None,
-        description="Optional descriptive operation within the process; this is not a separate foreground process.",
-    )
+    operation_context: str | None = None
     component_or_stage: str | None = Field(
         default=None,
-        description="Lifecycle/component context such as 'plant construction' or 'operation'. Keep this out of the flow name and search term.",
+        description="Lifecycle/component context such as plant construction or operation; never part of the exchange/search name.",
     )
-    basis: str | None = Field(
-        default=None,
-        description="Basis/denominator, e.g. per kg H2, per year, per electrolyser, per functional unit.",
-    )
+    basis: str | None = None
     ecoinvent_search_term: str | None = Field(
         default=None,
-        description=(
-            "Bare product/concept to use as the initial ecoinvent search term. It must not contain "
-            "context labels such as plant construction/capital input."
-        ),
+        description="Bare concept used for ecoinvent retrieval when no source-provided background mapping is available.",
     )
     ecoinvent_activity_hint: str | None = Field(
         default=None,
         description=(
-            "Exact background activity name only when an uploaded source explicitly provides an "
-            "unambiguous database mapping for this product. Never infer a subtype or dataset name."
+            "Source-supported background activity name. It may be an exact mapping or an intentional proxy; "
+            "the relation must be stated separately in background_mapping_relation."
         ),
     )
-    ecoinvent_location_hint: str | None = Field(
+    ecoinvent_location_hint: str | None = None
+    background_mapping_relation: Literal["exact", "proxy", "uncertain"] | None = Field(
         default=None,
-        description="Location attached to an explicit source-provided background activity mapping, if present.",
+        description=(
+            "How the source-supported background activity relates to the foreground exchange: exact, proxy, or uncertain. "
+            "Do not rename the foreground exchange when a proxy is used."
+        ),
     )
-    background_mapping_evidence: list[SourceEvidence] = Field(
-        default_factory=list,
-        description="Evidence for any explicit source-provided background activity/location mapping.",
+    background_mapping_rationale: str | None = Field(
+        default=None,
+        description="Short explanation of why the source evidence supports the exact/proxy/uncertain relationship.",
     )
+    background_mapping_evidence: list[SourceEvidence] = Field(default_factory=list)
     notes: str | None = None
-    evidence: list[SourceEvidence] = Field(
-        default_factory=list,
-        description="All relevant supporting evidence across the uploaded document corpus. Multiple documents may jointly support one flow.",
-    )
+    evidence: list[SourceEvidence] = Field(default_factory=list)
 
 
 class InventoryExtraction(BaseModel):
@@ -183,10 +145,7 @@ class InventoryExtraction(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    functional_unit: str | None = Field(
-        default=None,
-        description="Functional unit only if explicitly stated or clearly defined in supplied evidence.",
-    )
-    source_summary: str = Field(description="One-sentence description of the evidence corpus analysed.")
+    functional_unit: str | None = None
+    source_summary: str
     assumptions_or_warnings: list[str] = Field(default_factory=list)
     flows: list[InventoryFlow] = Field(default_factory=list)
