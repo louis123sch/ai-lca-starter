@@ -20,14 +20,15 @@ This prototype deliberately **does not** let the LLM calculate LCIA or fabricate
 - Allow one foreground process to be supported by evidence from several documents.
 - Allow one foreground flow to be supported by evidence from several documents.
 - Merge repeated descriptions of the same process/flow across documents instead of creating duplicate foreground activities or duplicate ecoinvent searches.
+- Keep explicitly different scenarios separate when their geography/time context conflicts.
 - Treat conflicting evidence as a warning rather than silently averaging, choosing, or duplicating it.
 - Group related processes by technology/pathway.
 - Keep engineering operations such as plasma generation, purification or separation inside a foreground process unless the combined evidence explicitly supports them as separate modelled processes.
-- Require direct evidence for each proposed foreground process.
+- Require direct evidence for each proposed foreground process and flow.
 - Capture evidence-derived study/process geography and time context.
 - Let the user approve which foreground processes proceed to exchange extraction.
 - Deterministically reject flows assigned to invented or unapproved processes.
-- Remove unsupported electricity voltage specificity when the evidence corpus only states `electricity`.
+- Remove unsupported electricity voltage specificity when the evidence cited for that flow only states `electricity`.
 - Search a real database already installed in your Brightway 2.5 project.
 - Rank candidate activities using geography extracted from the evidence corpus when available; there is no manual preferred-geography setting.
 - Review and manually approve candidate ecoinvent activities.
@@ -111,7 +112,7 @@ Uploaded files are not processed as independent LCAs. They are wrapped with sour
 
 For example, if `paper.pdf` establishes that the study models one thermal-plasma methane-pyrolysis process and `supplement.docx` supplies its electricity and natural-gas inventory, the expected result is **one foreground methane-pyrolysis process** whose flows are supported by both files. The supplement should not generate another foreground process merely because its quantities live in another document.
 
-Likewise, if the same electricity exchange appears in both files, it should remain one exchange with multiple evidence records. If the documents genuinely disagree about its amount or basis, the program should flag that conflict for review rather than average the values or silently create duplicate flows.
+Likewise, if the same electricity exchange appears in both files, it should remain one exchange with multiple evidence records. The deterministic validator merges repeated process descriptions and exact repeated exchanges while retaining evidence from all contributing files. If the documents genuinely disagree about amount, basis, geography or scenario, the program should flag or preserve the distinction rather than average values or silently duplicate the model.
 
 ## Document extraction and provenance
 
@@ -132,7 +133,7 @@ ai-lca-starter/
 │   ├── models.py             # process-map and multi-source evidence schemas
 │   ├── documents.py          # local PDF / Word extraction + corpus construction
 │   ├── llm.py                # corpus-wide process discovery + constrained inventory extraction
-│   ├── validation.py         # deterministic process/flow safeguards
+│   ├── validation.py         # deterministic process/flow safeguards + cross-document merging
 │   ├── brightway_search.py   # real Brightway candidate retrieval + evidence-derived geography ranking
 │   └── export.py
 ├── notebooks/
