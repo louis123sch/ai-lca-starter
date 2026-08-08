@@ -146,7 +146,11 @@ def _location_rank(location: str, preferences: list[str]) -> int:
     return 4
 
 
-def _query_variants(query: str, activity_type_hint: str | None = None) -> list[str]:
+def _query_variants(
+    query: str,
+    activity_type_hint: str | None = None,
+    technology_hint: str | None = None,
+) -> list[str]:
     query = (query or "").strip()
     if not query:
         return []
@@ -163,6 +167,10 @@ def _query_variants(query: str, activity_type_hint: str | None = None) -> list[s
         variants.append(f"{query} construction")
     elif hint == "operation" and "operation" not in query.lower():
         variants.append(f"{query} operation")
+
+    technology = (technology_hint or "").strip()
+    if technology and technology.casefold() not in query.casefold():
+        variants.append(f"{query} {technology}")
 
     return list(dict.fromkeys(variants))
 
@@ -182,6 +190,7 @@ def _score_candidate(
     preferences: list[str],
     unit: str | None,
     activity_type_hint: str | None,
+    technology_hint: str | None,
     retrieval_rank: int,
 ) -> tuple[float, list[str]]:
     score = max(0.0, 12.0 - retrieval_rank * 0.08)
@@ -239,6 +248,14 @@ def _score_candidate(
         score += 16
         reasons.append(f"activity type matches {hint} preference")
 
+    technology = (technology_hint or "").strip()
+    if technology:
+        technology_tokens = _tokens(technology)
+        technology_overlap = technology_tokens & candidate_tokens
+        if technology_overlap:
+            score += min(14, 3.5 * len(technology_overlap))
+            reasons.append(f"supplier/technology overlap: {', '.join(sorted(technology_overlap))}")
+
     return score, reasons
 
 
@@ -251,6 +268,7 @@ def search_candidates(
     limit: int = 12,
     unit: str | None = None,
     activity_type_hint: str | None = None,
+    technology_hint: str | None = None,
 ) -> list[dict]:
     """Retrieve and explain ranked real Brightway/ecoinvent candidates."""
     set_project(project_name)
@@ -263,7 +281,7 @@ def search_candidates(
         return []
 
     preferences = location_preferences_from_context(location_hint)
-    variants = _query_variants(query, activity_type_hint)
+    variants = _query_variants(query, activity_type_hint, technology_hint)
     pool_limit = max(30, limit * 5)
 
     collected: list[tuple[object, int]] = []
@@ -302,6 +320,7 @@ def search_candidates(
             preferences=preferences,
             unit=unit,
             activity_type_hint=activity_type_hint,
+            technology_hint=technology_hint,
             retrieval_rank=rank,
         )
         candidate["match_score"] = round(score, 1)
