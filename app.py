@@ -129,6 +129,7 @@ if st.button("1. Analyse evidence corpus", type="primary", disabled=not bool(sou
         st.session_state.pop("inventory_df", None)
         st.session_state.pop("candidates", None)
         st.session_state.pop("candidate_geographies", None)
+        st.session_state.pop("candidate_queries", None)
     except Exception as exc:
         st.exception(exc)
 
@@ -248,6 +249,7 @@ if "process_map" in st.session_state:
             st.session_state["inventory_df"] = extraction_to_dataframe(extraction)
             st.session_state.pop("candidates", None)
             st.session_state.pop("candidate_geographies", None)
+            st.session_state.pop("candidate_queries", None)
         except Exception as exc:
             st.exception(exc)
 
@@ -303,6 +305,7 @@ if "extraction" in st.session_state:
     if st.button("3. Search ecoinvent candidates", disabled=not can_search):
         candidate_map: dict[int, list[dict]] = {}
         candidate_geographies: dict[int, str | None] = {}
+        candidate_queries: dict[int, str] = {}
         progress = st.progress(0.0)
         included = edited_df[
             (edited_df["include"] == True)  # noqa: E712
@@ -325,6 +328,7 @@ if "extraction" in st.session_state:
             process_id = str(row.get("process_id", "")).strip()
             geography = process_geography(process_map, process_id) if process_map else None
             candidate_geographies[flow_id] = geography
+            candidate_queries[flow_id] = query
             try:
                 candidate_map[flow_id] = search_candidates(
                     project_name=project_name,
@@ -338,17 +342,19 @@ if "extraction" in st.session_state:
             progress.progress(n / max(len(included), 1))
         st.session_state["candidates"] = candidate_map
         st.session_state["candidate_geographies"] = candidate_geographies
+        st.session_state["candidate_queries"] = candidate_queries
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
     st.subheader("Candidate background processes")
     st.caption(
-        "These are real results returned by your selected Brightway database. When the evidence corpus identifies an operating geography, matching locations are ranked first; no manual geography preference is used."
+        "The extracted flow name is only the starting search query. Edit the query for any flow and search again without changing the evidence-backed foreground inventory. Evidence-derived geography remains a soft ranking signal."
     )
     mapping_rows = []
     inv_df = st.session_state["inventory_df"]
     candidate_geographies = st.session_state.get("candidate_geographies", {})
+    candidate_queries = st.session_state.setdefault("candidate_queries", {})
 
-    for flow_id, candidates in st.session_state["candidates"].items():
+    for flow_id, candidates in list(st.session_state["candidates"].items()):
         matching = inv_df[inv_df["flow_id"] == flow_id]
         flow_name = matching.iloc[0]["name"] if not matching.empty else f"Flow {flow_id}"
         process_name = matching.iloc[0]["process_name"] if not matching.empty else "Unknown process"
@@ -361,8 +367,44 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
             context += " | Evidence-derived geography: not identified"
         st.caption(context)
 
+        query_col, search_col = st.columns([5, 1])
+        with query_col:
+            edited_query = st.text_input(
+                "Ecoinvent search query",
+                value=candidate_queries.get(flow_id, flow_name),
+                key=f"search_query_{flow_id}",
+                help="This changes only the Brightway/ecoinvent search. It does not alter the extracted LCI flow name or evidence.",
+            )
+        with search_col:
+            st.write("")
+            st.write("")
+            search_again = st.button(
+                "Search again",
+                key=f"search_again_{flow_id}",
+                use_container_width=True,
+                disabled=not bool(project_name and database_name and edited_query.strip()),
+            )
+
+        if search_again:
+            candidate_queries[flow_id] = edited_query.strip()
+            try:
+                st.session_state["candidates"][flow_id] = search_candidates(
+                    project_name=project_name,
+                    database_name=database_name,
+                    query=edited_query.strip(),
+                    location_hint=geography,
+                    limit=candidate_limit,
+                )
+            except Exception as exc:
+                st.session_state["candidates"][flow_id] = [{"error": str(exc)}]
+            st.session_state["candidate_queries"] = candidate_queries
+            st.session_state.pop(f"mapping_{flow_id}", None)
+            st.rerun()
+
+        current_query = candidate_queries.get(flow_id, flow_name)
+
         if not candidates:
-            st.warning("No candidates returned.")
+            st.warning("No candidates returned. Edit the search query above and search again.")
             continue
         if "error" in candidates[0]:
             st.error(candidates[0]["error"])
@@ -392,6 +434,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                 {
                     "flow_id": flow_id,
                     "flow_name": flow_name,
+                    "search_query": current_query,
                     "process_name": process_name,
                     "evidence_geography": geography,
                     **chosen,
