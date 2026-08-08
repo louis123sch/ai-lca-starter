@@ -111,7 +111,16 @@ class InventoryFlow(BaseModel):
     process_id: str
     technology_group: str
     process_name: str
-    name: str = Field(description="Plain-language material, energy, transport, emission, or product flow.")
+    name: str = Field(
+        description=(
+            "Canonical bare exchange concept only, e.g. 'concrete', 'steel', 'aluminium', "
+            "'natural gas'. Do not append lifecycle-stage labels such as '(plant construction)'."
+        )
+    )
+    source_label: str | None = Field(
+        default=None,
+        description="The concise wording used for this flow in the quantitative inventory source, e.g. 'Aluminum'.",
+    )
     amount: float | None = Field(
         default=None,
         description="Numeric quantity supported by the evidence corpus; null if no quantity is stated.",
@@ -132,10 +141,35 @@ class InventoryFlow(BaseModel):
         default=None,
         description="Optional descriptive operation within the process; this is not a separate foreground process.",
     )
-    component_or_stage: str | None = None
+    component_or_stage: str | None = Field(
+        default=None,
+        description="Lifecycle/component context such as 'plant construction' or 'operation'. Keep this out of the flow name and search term.",
+    )
     basis: str | None = Field(
         default=None,
         description="Basis/denominator, e.g. per kg H2, per year, per electrolyser, per functional unit.",
+    )
+    ecoinvent_search_term: str | None = Field(
+        default=None,
+        description=(
+            "Bare product/concept to use as the initial ecoinvent search term. It must not contain "
+            "context labels such as plant construction/capital input."
+        ),
+    )
+    ecoinvent_activity_hint: str | None = Field(
+        default=None,
+        description=(
+            "Exact background activity name only when an uploaded source explicitly provides an "
+            "unambiguous database mapping for this product. Never infer a subtype or dataset name."
+        ),
+    )
+    ecoinvent_location_hint: str | None = Field(
+        default=None,
+        description="Location attached to an explicit source-provided background activity mapping, if present.",
+    )
+    background_mapping_evidence: list[SourceEvidence] = Field(
+        default_factory=list,
+        description="Evidence for any explicit source-provided background activity/location mapping.",
     )
     notes: str | None = None
     evidence: list[SourceEvidence] = Field(
