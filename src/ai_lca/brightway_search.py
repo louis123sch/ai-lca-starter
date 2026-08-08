@@ -26,6 +26,14 @@ ACTIVITY_TYPES = {
     "unknown",
 }
 
+BIOSPHERE_ALIASES = {
+    "co2": "carbon dioxide",
+    "ch4": "methane",
+    "n2o": "dinitrogen monoxide",
+    "nox": "nitrogen oxides",
+    "so2": "sulfur dioxide",
+}
+
 
 def set_project(project_name: str) -> None:
     if not project_name.strip():
@@ -37,6 +45,12 @@ def list_databases(project_name: str | None = None) -> list[str]:
     if project_name:
         set_project(project_name)
     return sorted(list(bd.databases))
+
+
+def list_biosphere_databases(project_name: str | None = None) -> list[str]:
+    """Return installed databases whose names indicate biosphere/elementary flows."""
+    names = list_databases(project_name)
+    return [name for name in names if "biosphere" in name.casefold()]
 
 
 def _activity_type(name: str) -> str:
@@ -66,6 +80,23 @@ def _activity_to_dict(activity) -> dict:
         "unit": activity.get("unit", ""),
         "activity_type": _activity_type(name),
         "comment": (activity.get("comment", "") or "")[:800],
+    }
+
+
+def _biosphere_to_dict(flow) -> dict:
+    categories = flow.get("categories", ()) or ()
+    if isinstance(categories, str):
+        category_text = categories
+    else:
+        category_text = " > ".join(str(item) for item in categories)
+    return {
+        "id": getattr(flow, "id", None),
+        "database": flow.get("database", ""),
+        "code": flow.get("code", ""),
+        "name": flow.get("name", ""),
+        "categories": category_text,
+        "unit": flow.get("unit", ""),
+        "type": flow.get("type", ""),
     }
 
 
@@ -175,6 +206,17 @@ def _query_variants(
     return list(dict.fromkeys(variants))
 
 
+def _biosphere_query_variants(query: str) -> list[str]:
+    query = " ".join((query or "").split()).strip()
+    if not query:
+        return []
+    variants = [query]
+    alias = BIOSPHERE_ALIASES.get(query.casefold())
+    if alias:
+        variants.append(alias)
+    return list(dict.fromkeys(variants))
+
+
 def _tokens(text: str) -> set[str]:
     return {
         token
@@ -259,6 +301,59 @@ def _score_candidate(
     return score, reasons
 
 
+def _score_biosphere_candidate(
+    candidate: dict,
+    *,
+    query: str,
+    unit: str | None,
+    compartment_hint: str | None,
+    retrieval_rank: int,
+) -> tuple[float, list[str]]:
+    score = max(0.0, 10.0 - retrieval_rank * 0.05)
+    reasons: list[str] = []
+
+    q = query.strip().casefold()
+    name = (candidate.get("name") or "").strip().casefold()
+    categories = (candidate.get("categories") or "").strip().casefold()
+
+    if q and q == name:
+        score += 55
+        reasons.append("biosphere name exactly matches query")
+    elif q and q in name:
+        score += 34
+        reasons.append("biosphere name contains query")
+    elif name and name in q:
+        score += 22
+        reasons.append("query contains biosphere name")
+
+    overlap = _tokens(q) & _tokens(name)
+    if overlap:
+        score += min(16, 4 * len(overlap))
+        reasons.append(f"biosphere keyword overlap: {', '.join(sorted(overlap))}")
+
+    if unit and (candidate.get("unit") or "").strip().casefold() == unit.strip().casefold():
+        score += 15
+        reasons.append("unit matches biosphere flow")
+
+    compartment = (compartment_hint or "").strip()
+    if compartment:
+        compartment_tokens = _tokens(compartment)
+        category_tokens = _tokens(categories)
+        compartment_overlap = compartment_tokens & category_tokens
+        if _normalise_compartment(compartment) == _normalise_compartment(categories):
+            score += 28
+            reasons.append("compartment exactly matches source hint")
+        elif compartment_overlap:
+            score += min(24, 8 * len(compartment_overlap))
+            reasons.append("compartment matches source hint")
+
+    return score, reasons
+
+
+def _normalise_compartment(value: str | None) -> str:
+    return " ".join((value or "").replace(">", " ").replace("/", " ").split()).casefold()
+
+
 def search_candidates(
     *,
     project_name: str,
@@ -270,7 +365,7 @@ def search_candidates(
     activity_type_hint: str | None = None,
     technology_hint: str | None = None,
 ) -> list[dict]:
-    """Retrieve and explain ranked real Brightway/ecoinvent candidates."""
+    """Retrieve and explain ranked real Brightway/ecoinvent technosphere candidates."""
     set_project(project_name)
     if database_name not in bd.databases:
         raise KeyError(f"Database '{database_name}' not found in Brightway project '{project_name}'")
@@ -325,6 +420,67 @@ def search_candidates(
         )
         candidate["match_score"] = round(score, 1)
         candidate["match_reasons"] = "; ".join(reasons) or "Brightway text-search result"
+        ranked.append(candidate)
+
+    ranked.sort(key=lambda item: item["match_score"], reverse=True)
+    return ranked[:limit]
+
+
+def search_biosphere_candidates(
+    *,
+    project_name: str,
+    database_name: str,
+    query: str,
+    limit: int = 12,
+    unit: str | None = None,
+    compartment_hint: str | None = None,
+) -> list[dict]:
+    """Retrieve and rank elementary flows from an installed Brightway biosphere database."""
+    set_project(project_name)
+    if database_name not in bd.databases:
+        raise KeyError(f"Biosphere database '{database_name}' not found in Brightway project '{project_name}'")
+
+    db = bd.Database(database_name)
+    variants = _biosphere_query_variants(query)
+    if not variants:
+        return []
+
+    pool_limit = max(40, limit * 6)
+    collected: list[tuple[object, int]] = []
+    seen: set[tuple] = set()
+    retrieval_rank = 0
+
+    for variant in variants:
+        try:
+            results = db.search(variant, limit=pool_limit)
+        except Exception:
+            lowered = variant.casefold()
+            results = [
+                flow
+                for flow in db
+                if lowered in (flow.get("name", "") or "").casefold()
+            ][:pool_limit]
+
+        for flow in results:
+            key = (flow.get("database"), flow.get("code"))
+            if key not in seen:
+                seen.add(key)
+                collected.append((flow, retrieval_rank))
+                retrieval_rank += 1
+
+    ranked: list[dict] = []
+    canonical_query = BIOSPHERE_ALIASES.get(variants[0].casefold(), variants[-1])
+    for flow, rank in collected:
+        candidate = _biosphere_to_dict(flow)
+        score, reasons = _score_biosphere_candidate(
+            candidate,
+            query=canonical_query,
+            unit=unit,
+            compartment_hint=compartment_hint,
+            retrieval_rank=rank,
+        )
+        candidate["match_score"] = round(score, 1)
+        candidate["match_reasons"] = "; ".join(reasons) or "Brightway biosphere search result"
         ranked.append(candidate)
 
     ranked.sort(key=lambda item: item["match_score"], reverse=True)
