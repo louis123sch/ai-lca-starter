@@ -17,6 +17,15 @@ CONTEXTUAL_SUFFIX_TERMS = (
     "for electricity recovery",
     "for energy recovery",
 )
+STEEL_SUBTYPE_TERMS = (
+    "low-alloyed",
+    "low alloyed",
+    "high-alloyed",
+    "high alloyed",
+    "unalloyed",
+    "chromium steel",
+    "steel 18/8",
+)
 TRAILING_PARENTHETICAL = re.compile(r"\s*\(([^()]*)\)\s*$")
 
 
@@ -227,6 +236,21 @@ def validate_inventory_against_process_map(
             )
             flow.ecoinvent_activity_hint = None
             flow.ecoinvent_location_hint = None
+
+        # Do not let a generic foreground steel row inherit a specific steel grade
+        # merely because several steel datasets are listed elsewhere in the corpus.
+        if flow.ecoinvent_activity_hint and _normalise_name(flow.name) == "steel":
+            hint_lower = flow.ecoinvent_activity_hint.casefold()
+            quantity_supports_subtype = any(term in evidence_lower for term in STEEL_SUBTYPE_TERMS)
+            hint_is_specific_subtype = any(term in hint_lower for term in STEEL_SUBTYPE_TERMS)
+            if hint_is_specific_subtype and not quantity_supports_subtype:
+                rejected_hint = flow.ecoinvent_activity_hint
+                flow.ecoinvent_activity_hint = None
+                flow.ecoinvent_location_hint = None
+                flow.background_mapping_evidence = []
+                warnings.append(
+                    f"Removed over-specific steel mapping hint '{rejected_hint}' because the quantitative foreground evidence identifies only generic steel."
+                )
 
         key = (
             flow.process_id,
