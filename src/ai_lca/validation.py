@@ -231,29 +231,50 @@ def validate_inventory_against_process_map(
             )
             flow.ecoinvent_activity_hint = None
             flow.ecoinvent_location_hint = None
+            flow.background_mapping_relation = None
+            flow.background_mapping_rationale = None
+
+        if flow.ecoinvent_activity_hint and flow.background_mapping_relation is None:
+            flow.background_mapping_relation = "uncertain"
+            warnings.append(
+                f"Background activity hint for '{flow.name}' has source evidence but no stated exact/proxy relation; marked uncertain for review."
+            )
+
+        if not flow.ecoinvent_activity_hint:
+            flow.ecoinvent_location_hint = None
+            flow.background_mapping_relation = None
+            flow.background_mapping_rationale = None
 
         if flow.ecoinvent_activity_hint and _normalise_name(flow.name) == "steel":
             hint_lower = flow.ecoinvent_activity_hint.casefold()
             quantity_supports_subtype = any(term in evidence_lower for term in STEEL_SUBTYPE_TERMS)
             hint_is_specific_subtype = any(term in hint_lower for term in STEEL_SUBTYPE_TERMS)
-            if hint_is_specific_subtype and not quantity_supports_subtype:
+            if hint_is_specific_subtype and not quantity_supports_subtype and flow.background_mapping_relation != "proxy":
                 rejected_hint = flow.ecoinvent_activity_hint
                 flow.ecoinvent_activity_hint = None
                 flow.ecoinvent_location_hint = None
+                flow.background_mapping_relation = None
+                flow.background_mapping_rationale = None
                 flow.background_mapping_evidence = []
                 warnings.append(
-                    f"Removed over-specific steel mapping hint '{rejected_hint}' because the quantitative foreground evidence identifies only generic steel."
+                    f"Removed over-specific steel mapping hint '{rejected_hint}' because the quantitative foreground evidence identifies only generic steel and no proxy relationship was supported."
                 )
 
+        # Different foreground/background equipment identities can be legitimate proxies.
+        # Preserve the foreground identity and label the mapping relationship instead of rejecting it.
         if flow.ecoinvent_activity_hint and "steam turbine" in _normalise_name(flow.name):
             if "gas turbine" in flow.ecoinvent_activity_hint.casefold():
-                rejected_hint = flow.ecoinvent_activity_hint
-                flow.ecoinvent_activity_hint = None
-                flow.ecoinvent_location_hint = None
-                flow.background_mapping_evidence = []
-                warnings.append(
-                    f"Removed incompatible equipment mapping hint '{rejected_hint}' because a steam turbine must not be mapped to a gas turbine dataset."
-                )
+                if flow.background_mapping_relation != "proxy":
+                    flow.background_mapping_relation = "proxy"
+                    warning = (
+                        "Treated the source-supported gas-turbine background activity as a proxy for the foreground steam turbine; "
+                        "the foreground exchange remains 'steam turbine'."
+                    )
+                    warnings.append(warning)
+                if not flow.background_mapping_rationale:
+                    flow.background_mapping_rationale = (
+                        "Foreground evidence identifies a steam turbine while the source's applied background-data list identifies a gas-turbine activity; this is represented as a proxy rather than an exact identity."
+                    )
 
         key = (
             flow.process_id,
@@ -276,6 +297,8 @@ def validate_inventory_against_process_map(
             if not existing.ecoinvent_activity_hint and flow.ecoinvent_activity_hint:
                 existing.ecoinvent_activity_hint = flow.ecoinvent_activity_hint
                 existing.ecoinvent_location_hint = flow.ecoinvent_location_hint
+                existing.background_mapping_relation = flow.background_mapping_relation
+                existing.background_mapping_rationale = flow.background_mapping_rationale
             if flow.notes and flow.notes not in (existing.notes or ""):
                 existing.notes = f"{existing.notes}; {flow.notes}" if existing.notes else flow.notes
             warnings.append(
