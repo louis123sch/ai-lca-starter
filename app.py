@@ -38,7 +38,6 @@ def _text(value) -> str:
 
 
 def process_geography(process_map, process_id: str) -> str | None:
-    """Return process geography, falling back to the corpus-wide study geography."""
     for group in process_map.technology_groups:
         for process in group.processes:
             if process.process_id == process_id:
@@ -60,7 +59,6 @@ def evidence_location_text(evidence) -> str:
 
 
 def suggested_activity_type(row) -> str:
-    """Return a soft initial ecoinvent activity-type preference for an exchange."""
     explicit_hint = _text(row.get("ecoinvent_activity_hint"))
     lower_hint = explicit_hint.lower()
     if lower_hint.startswith("market for ") or lower_hint.startswith("market group for "):
@@ -80,7 +78,6 @@ def suggested_activity_type(row) -> str:
 
 
 def initial_search_query(row) -> str:
-    """Prefer explicit source-provided background mapping, then clean search concept."""
     return (
         _text(row.get("ecoinvent_activity_hint"))
         or _text(row.get("ecoinvent_search_term"))
@@ -89,7 +86,6 @@ def initial_search_query(row) -> str:
 
 
 def search_geography(row, process_map) -> tuple[str | None, str]:
-    """Prefer an explicit source-provided exchange location over process geography."""
     explicit = _text(row.get("ecoinvent_location_hint"))
     if explicit:
         return explicit, "source-provided background mapping"
@@ -115,7 +111,6 @@ with st.sidebar:
                 st.warning("No databases found in this Brightway project.")
         except Exception as exc:
             st.warning(f"Brightway project not available yet: {exc}")
-
 
 st.subheader("1. Add evidence")
 paste_tab, upload_tab = st.tabs(["Paste text", "Upload documents"])
@@ -206,7 +201,6 @@ if st.button("2. Analyse evidence corpus", type="primary", disabled=not bool(sou
             st.session_state.pop(key, None)
     except Exception as exc:
         st.exception(exc)
-
 
 if "process_map" in st.session_state:
     process_map = st.session_state["process_map"]
@@ -331,7 +325,6 @@ if "process_map" in st.session_state:
         except Exception as exc:
             st.exception(exc)
 
-
 if "extraction" in st.session_state:
     extraction = st.session_state["extraction"]
     st.subheader("5. Review foreground inventory")
@@ -453,7 +446,6 @@ if "extraction" in st.session_state:
         st.session_state["candidate_geography_sources"] = candidate_geography_sources
         st.session_state["candidate_queries"] = candidate_queries
         st.session_state["candidate_activity_types"] = candidate_activity_types
-
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
     st.subheader("7. Review real ecoinvent candidates")
