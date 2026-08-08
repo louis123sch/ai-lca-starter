@@ -58,7 +58,7 @@ def test_generic_steel_does_not_inherit_specific_steel_dataset():
     assert any("over-specific steel mapping" in warning for warning in result.assumptions_or_warnings)
 
 
-def test_generic_steel_can_keep_an_explicit_generic_steel_mapping():
+def test_generic_steel_can_keep_an_explicit_proxy_mapping():
     process_map = _process_map()
     extraction = InventoryExtraction(
         source_summary="paper plus supplement",
@@ -73,18 +73,21 @@ def test_generic_steel_can_keep_an_explicit_generic_steel_mapping():
                 direction="input",
                 flow_kind="material",
                 ecoinvent_search_term="steel",
-                ecoinvent_activity_hint="Market for steel",
+                ecoinvent_activity_hint="Market for steel, low-alloyed",
                 ecoinvent_location_hint="GLO",
+                background_mapping_relation="proxy",
+                background_mapping_rationale="A separate source explicitly states that low-alloyed steel is used as the proxy for this generic steel input.",
                 evidence=[SourceEvidence(table="Table 2", evidence_text="Steel kg 5.06e-03")],
                 background_mapping_evidence=[
-                    SourceEvidence(table="Table S1", evidence_text="Steel | Market for steel | GLO | kg")
+                    SourceEvidence(table="Mapping note", evidence_text="Generic steel represented by market for steel, low-alloyed")
                 ],
             )
         ],
     )
 
     result = validate_inventory_against_process_map(extraction, process_map, "")
-    assert result.flows[0].ecoinvent_activity_hint == "Market for steel"
+    assert result.flows[0].ecoinvent_activity_hint == "Market for steel, low-alloyed"
+    assert result.flows[0].background_mapping_relation == "proxy"
 
 
 def test_context_suffix_is_not_part_of_search_concept():
@@ -113,7 +116,7 @@ def test_context_suffix_is_not_part_of_search_concept():
     assert "plant construction" in (flow.component_or_stage or "")
 
 
-def test_steam_turbine_does_not_inherit_gas_turbine_dataset():
+def test_steam_turbine_can_use_gas_turbine_as_proxy_without_renaming_foreground():
     process_map = _process_map()
     extraction = InventoryExtraction(
         source_summary="paper plus supplement",
@@ -141,6 +144,8 @@ def test_steam_turbine_does_not_inherit_gas_turbine_dataset():
 
     result = validate_inventory_against_process_map(extraction, process_map, "")
     flow = result.flows[0]
-    assert flow.ecoinvent_activity_hint is None
-    assert flow.ecoinvent_location_hint is None
-    assert any("steam turbine" in warning and "gas turbine" in warning for warning in result.assumptions_or_warnings)
+    assert flow.name == "steam turbine"
+    assert flow.ecoinvent_activity_hint == "Market for gas turbine, 10MW electrical"
+    assert flow.ecoinvent_location_hint == "GLO"
+    assert flow.background_mapping_relation == "proxy"
+    assert "proxy" in (flow.background_mapping_rationale or "").lower()
