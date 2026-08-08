@@ -9,6 +9,10 @@ class SourceEvidence(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    source_document: str | None = Field(
+        default=None,
+        description="Filename from the nearest [DOCUMENT ...] marker when multiple source documents are supplied.",
+    )
     page: int | None = Field(
         default=None,
         description="PDF page number if explicitly available from [PAGE N] markers.",
