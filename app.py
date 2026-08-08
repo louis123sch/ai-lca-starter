@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from ai_lca.documents import extract_docx_text, extract_pdf_text
+from ai_lca.documents import combine_document_texts, extract_docx_text, extract_pdf_text
 from ai_lca.llm import extract_inventory_from_text, extract_process_map_from_text
 from ai_lca.export import dataframe_to_json, extraction_to_dataframe, process_map_to_dataframe
 from ai_lca.brightway_search import list_databases, search_candidates
@@ -14,16 +14,29 @@ load_dotenv()
 
 st.set_page_config(page_title="AI-LCA Foreground Builder", layout="wide")
 st.title("AI-LCA Foreground Builder")
-st.caption("AI maps the paper → human confirms foreground processes → AI extracts exchanges → human approves → Brightway calculates")
+st.caption("AI maps the evidence corpus → human confirms foreground processes → AI extracts exchanges → human approves → Brightway calculates")
 
 
 def process_geography(process_map, process_id: str) -> str | None:
-    """Return process geography, falling back to the source-wide study geography."""
+    """Return process geography, falling back to the corpus-wide study geography."""
     for group in process_map.technology_groups:
         for process in group.processes:
             if process.process_id == process_id:
                 return process.geographic_context or process_map.geographic_context
     return process_map.geographic_context
+
+
+def evidence_location_text(evidence) -> str:
+    bits = []
+    if evidence.source_document:
+        bits.append(evidence.source_document)
+    if evidence.page is not None:
+        bits.append(f"p. {evidence.page}")
+    if evidence.table:
+        bits.append(evidence.table)
+    if evidence.section:
+        bits.append(evidence.section)
+    return " · ".join(bits) or "Source location not identified"
 
 
 with st.sidebar:
@@ -44,42 +57,47 @@ with st.sidebar:
         except Exception as exc:
             st.warning(f"Brightway project not available yet: {exc}")
 
-paste_tab, upload_tab = st.tabs(["Paste text", "Upload document"])
+paste_tab, upload_tab = st.tabs(["Paste text", "Upload documents"])
 
 with paste_tab:
     pasted_text = st.text_area(
-        "Paste paper text, technical documentation, datasheet text, or engineering notes",
+        "Paste additional evidence, technical documentation, datasheet text, or engineering notes",
         height=320,
-        placeholder="Paste the relevant source material here…",
+        placeholder="Optional: pasted text is treated as another source in the same evidence corpus…",
     )
 
 with upload_tab:
-    uploaded_document = st.file_uploader(
-        "Upload a PDF or Word document",
+    uploaded_documents = st.file_uploader(
+        "Upload PDFs and Word documents",
         type=["pdf", "docx"],
-        help="PDF text is retained with page markers. Word (.docx) paragraphs and tables are retained in document order.",
+        accept_multiple_files=True,
+        help="Upload the paper, supplementary information, appendices, reports, or other supporting sources together. All readable files are treated as one evidence corpus.",
     )
-    document_preview = ""
-    if uploaded_document is not None:
-        try:
-            filename = uploaded_document.name.lower()
-            document_bytes = uploaded_document.getvalue()
-            if filename.endswith(".pdf"):
-                document_preview = extract_pdf_text(document_bytes)
-                document_kind = "PDF"
-            elif filename.endswith(".docx"):
-                document_preview = extract_docx_text(document_bytes)
-                document_kind = "Word document"
-            else:
-                raise ValueError("Unsupported document type. Upload PDF or .docx.")
 
-            st.success(
-                f"Extracted readable content from {document_kind} ({len(document_preview):,} characters)."
-            )
-            with st.expander("Preview extracted content"):
-                st.text(document_preview[:12000])
-        except Exception as exc:
-            st.error(str(exc))
+    extracted_documents: list[tuple[str, str]] = []
+    if uploaded_documents:
+        for uploaded_document in uploaded_documents:
+            try:
+                filename = uploaded_document.name
+                lower_name = filename.lower()
+                document_bytes = uploaded_document.getvalue()
+                if lower_name.endswith(".pdf"):
+                    extracted_text = extract_pdf_text(document_bytes)
+                    document_kind = "PDF"
+                elif lower_name.endswith(".docx"):
+                    extracted_text = extract_docx_text(document_bytes)
+                    document_kind = "Word"
+                else:
+                    raise ValueError("Unsupported document type. Upload PDF or .docx.")
+
+                extracted_documents.append((filename, extracted_text))
+                st.success(
+                    f"{filename}: extracted {document_kind} content ({len(extracted_text):,} characters)."
+                )
+                with st.expander(f"Preview: {filename}"):
+                    st.text(extracted_text[:12000])
+            except Exception as exc:
+                st.error(f"{uploaded_document.name}: {exc}")
 
 extra_instructions = st.text_area(
     "Optional study instructions",
@@ -87,11 +105,19 @@ extra_instructions = st.text_area(
     height=90,
 )
 
-source_text = pasted_text.strip() or document_preview.strip()
+corpus_documents = list(extracted_documents)
+if pasted_text.strip():
+    corpus_documents.append(("pasted-text", pasted_text.strip()))
+source_text = combine_document_texts(corpus_documents)
 
-if st.button("1. Analyse paper structure", type="primary", disabled=not bool(source_text)):
+if corpus_documents:
+    st.caption(
+        f"Evidence corpus: {len(corpus_documents)} source(s). Processes and flows will be inferred from the combined evidence, not document-by-document."
+    )
+
+if st.button("1. Analyse evidence corpus", type="primary", disabled=not bool(source_text)):
     try:
-        with st.spinner("Identifying paper-supported foreground processes and descriptive operations…"):
+        with st.spinner("Building one process map from all uploaded evidence…"):
             process_map = extract_process_map_from_text(
                 source_text,
                 model=model,
@@ -110,7 +136,7 @@ if "process_map" in st.session_state:
     process_map = st.session_state["process_map"]
     st.subheader("Review AI foreground interpretation")
     st.caption(
-        "Only paper-supported foreground processes are listed as processes. Engineering steps shown under Operations are context only and will not become separate Brightway activities or ecoinvent searches. Geography is taken from the source rather than entered manually."
+        "The process map is synthesized across the complete evidence corpus. Evidence from several files can jointly support one process. Repeated descriptions are merged; engineering operations remain context only and do not become extra Brightway activities."
     )
 
     meta1, meta2, meta3, meta4 = st.columns(4)
@@ -135,34 +161,38 @@ if "process_map" in st.session_state:
                 if process.geographic_context:
                     context_bits.append(f"geography: {process.geographic_context}")
                 elif process_map.geographic_context:
-                    context_bits.append(f"geography: {process_map.geographic_context} (study-wide)")
+                    context_bits.append(f"geography: {process_map.geographic_context} (corpus-wide)")
                 if process.temporal_context:
                     context_bits.append(f"time: {process.temporal_context}")
                 elif process_map.temporal_context:
-                    context_bits.append(f"time: {process_map.temporal_context} (study-wide)")
+                    context_bits.append(f"time: {process_map.temporal_context} (corpus-wide)")
                 if context_bits:
                     st.caption(" | ".join(context_bits))
                 st.write(process.reason_for_separate_process)
+
                 if process.evidence:
-                    evidence = process.evidence[0]
-                    where = [
-                        f"p. {evidence.page}" if evidence.page is not None else None,
-                        evidence.table,
-                        evidence.section,
-                    ]
-                    where_text = " · ".join(x for x in where if x)
-                    if where_text:
-                        st.caption(where_text)
-                    st.code(evidence.evidence_text, language=None)
+                    st.markdown("**Supporting evidence:**")
+                    for evidence in process.evidence:
+                        st.caption(evidence_location_text(evidence))
+                        st.code(evidence.evidence_text, language=None)
+
                 if process.operations:
                     st.markdown("**Operations described inside this process — not separate foreground processes:**")
                     for operation in process.operations:
-                        st.write(f"• {operation.name}")
+                        sources = sorted(
+                            {
+                                evidence.source_document
+                                for evidence in operation.evidence
+                                if evidence.source_document
+                            }
+                        )
+                        source_suffix = f" — {', '.join(sources)}" if sources else ""
+                        st.write(f"• {operation.name}{source_suffix}")
 
     process_df = st.session_state["process_map_df"]
     if process_df.empty:
         st.warning(
-            "No paper-supported foreground processes were identified. Nothing will be sent to ecoinvent matching; adjust the study instructions or inspect the source text before continuing."
+            "No evidence-backed foreground processes were identified. Nothing will be sent to ecoinvent matching; inspect the evidence corpus or adjust the study instructions before continuing."
         )
         selected_process_ids = []
     else:
@@ -181,8 +211,9 @@ if "process_map" in st.session_state:
                 "confidence",
                 "reason_for_separate_process",
                 "operations_not_separate_processes",
-                "page",
-                "table",
+                "source_documents",
+                "pages",
+                "tables",
                 "evidence_text",
             ],
             column_config={
@@ -190,7 +221,8 @@ if "process_map" in st.session_state:
                 "process_id": st.column_config.TextColumn("Process ID", width="small"),
                 "process_name": st.column_config.TextColumn("Foreground process", width="large"),
                 "technology_group": st.column_config.TextColumn("Technology / pathway"),
-                "geographic_context": st.column_config.TextColumn("Paper-derived geography"),
+                "geographic_context": st.column_config.TextColumn("Evidence-derived geography"),
+                "source_documents": st.column_config.TextColumn("Supporting documents", width="large"),
                 "operations_not_separate_processes": st.column_config.TextColumn("Operations (context only)", width="large"),
                 "reason_for_separate_process": st.column_config.TextColumn("Why this is a separate process", width="large"),
                 "evidence_text": st.column_config.TextColumn("Process evidence", width="large"),
@@ -204,7 +236,7 @@ if "process_map" in st.session_state:
 
     if st.button("2. Extract inventory for selected processes", disabled=not bool(selected_process_ids)):
         try:
-            with st.spinner("Extracting exchanges only under the confirmed process map…"):
+            with st.spinner("Building process inventories from all relevant evidence across the corpus…"):
                 extraction = extract_inventory_from_text(
                     source_text,
                     process_map=process_map,
@@ -223,7 +255,7 @@ if "extraction" in st.session_state:
     extraction = st.session_state["extraction"]
     st.subheader("Proposed foreground inventory")
     st.caption(
-        "Flows are tied to the confirmed foreground process IDs. Only quantified inputs default to background matching; outputs, emissions and unquantified mentions remain visible but are not searched automatically."
+        "Each flow is tied to a confirmed process and may combine supporting evidence from several documents. Only quantified inputs default to background matching; outputs, emissions and unquantified mentions remain visible but are not searched automatically."
     )
 
     if extraction.assumptions_or_warnings:
@@ -244,6 +276,7 @@ if "extraction" in st.session_state:
             "process_id": st.column_config.TextColumn("Process ID", disabled=True),
             "process_name": st.column_config.TextColumn("Foreground process", width="large"),
             "technology_group": st.column_config.TextColumn("Technology / pathway"),
+            "source_documents": st.column_config.TextColumn("Supporting documents", width="large"),
             "evidence_text": st.column_config.TextColumn("Evidence", width="large"),
         },
         key="inventory_editor",
@@ -309,7 +342,7 @@ if "extraction" in st.session_state:
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
     st.subheader("Candidate background processes")
     st.caption(
-        "These are real results returned by your selected Brightway database. When the paper identifies an operating geography, matching locations are ranked first; no manual geography preference is used."
+        "These are real results returned by your selected Brightway database. When the evidence corpus identifies an operating geography, matching locations are ranked first; no manual geography preference is used."
     )
     mapping_rows = []
     inv_df = st.session_state["inventory_df"]
@@ -323,9 +356,9 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
         st.markdown(f"### {flow_name}")
         context = f"Foreground process: {process_name}"
         if geography:
-            context += f" | Paper-derived geography: {geography}"
+            context += f" | Evidence-derived geography: {geography}"
         else:
-            context += " | Paper-derived geography: not identified"
+            context += " | Evidence-derived geography: not identified"
         st.caption(context)
 
         if not candidates:
