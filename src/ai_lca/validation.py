@@ -59,7 +59,6 @@ def _merge_evidence(target: list, incoming: list) -> None:
 
 
 def _strip_contextual_suffix(value: str | None) -> tuple[str, str | None]:
-    """Remove trailing lifecycle/context parentheticals, preserving chemically meaningful qualifiers."""
     cleaned = " ".join((value or "").split()).strip()
     removed: list[str] = []
     while cleaned:
@@ -83,7 +82,6 @@ def _clean_search_term(value: str | None, fallback: str) -> str:
 
 
 def normalise_process_ids(process_map: ProcessMap) -> ProcessMap:
-    """Merge duplicate cross-document process descriptions, require evidence, and assign IDs."""
     result = process_map.model_copy(deep=True)
     warnings = list(result.assumptions_or_warnings)
 
@@ -169,7 +167,6 @@ def validate_inventory_against_process_map(
     source_text: str,
     allowed_process_ids: set[str] | None = None,
 ) -> InventoryExtraction:
-    """Prevent invented/unapproved flows, clean search concepts, and merge cross-document evidence."""
     result = extraction.model_copy(deep=True)
     index = process_index(process_map)
     if allowed_process_ids is not None:
@@ -246,6 +243,16 @@ def validate_inventory_against_process_map(
                 flow.background_mapping_evidence = []
                 warnings.append(
                     f"Removed over-specific steel mapping hint '{rejected_hint}' because the quantitative foreground evidence identifies only generic steel."
+                )
+
+        if flow.ecoinvent_activity_hint and "steam turbine" in _normalise_name(flow.name):
+            if "gas turbine" in flow.ecoinvent_activity_hint.casefold():
+                rejected_hint = flow.ecoinvent_activity_hint
+                flow.ecoinvent_activity_hint = None
+                flow.ecoinvent_location_hint = None
+                flow.background_mapping_evidence = []
+                warnings.append(
+                    f"Removed incompatible equipment mapping hint '{rejected_hint}' because a steam turbine must not be mapped to a gas turbine dataset."
                 )
 
         key = (
