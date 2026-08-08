@@ -393,7 +393,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                     "flow_id": flow_id,
                     "flow_name": flow_name,
                     "process_name": process_name,
-                    "paper_geography": geography,
+                    "evidence_geography": geography,
                     **chosen,
                 }
             )
