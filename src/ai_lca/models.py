@@ -79,7 +79,7 @@ class ProcessMap(BaseModel):
 
 
 class InventoryFlow(BaseModel):
-    """One proposed foreground inventory flow assigned to a confirmed foreground process."""
+    """One proposed foreground exchange assigned to a confirmed foreground process."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -88,7 +88,7 @@ class InventoryFlow(BaseModel):
     process_name: str
     name: str = Field(
         description=(
-            "Canonical bare exchange concept only, e.g. concrete, steel, aluminium, natural gas. "
+            "Canonical bare exchange concept only, e.g. concrete, steel, aluminium, natural gas, carbon dioxide. "
             "Do not append lifecycle-stage labels such as plant construction."
         )
     )
@@ -96,6 +96,13 @@ class InventoryFlow(BaseModel):
     amount: float | None = None
     unit: str | None = None
     direction: Literal["input", "output", "emission", "unknown"] = "unknown"
+    exchange_type: Literal["technosphere", "biosphere", "production", "unknown"] = Field(
+        default="technosphere",
+        description=(
+            "technosphere for products/services supplied by background activities; biosphere for direct elementary "
+            "emissions or resource uptake crossing the environment boundary; production for reference products/co-products."
+        ),
+    )
     flow_kind: Literal[
         "material",
         "energy",
@@ -104,6 +111,8 @@ class InventoryFlow(BaseModel):
         "waste",
         "product",
         "emission",
+        "resource",
+        "land",
         "other",
     ] = "other"
     operation_context: str | None = None
@@ -122,7 +131,7 @@ class InventoryFlow(BaseModel):
     supplier_technology_hint: str | None = Field(
         default=None,
         description=(
-            "Explicit supply technology/provenance useful for background matching, e.g. offshore wind, North Sea natural gas, or a named production route. "
+            "Explicit supply technology/provenance useful for technosphere matching, e.g. offshore wind, North Sea natural gas, or a named production route. "
             "Do not infer it from general engineering knowledge."
         ),
     )
@@ -132,12 +141,12 @@ class InventoryFlow(BaseModel):
     )
     ecoinvent_search_term: str | None = Field(
         default=None,
-        description="Bare concept used for ecoinvent retrieval when no source-provided background mapping is available.",
+        description="Bare concept used for technosphere/eecoinvent retrieval. Not used for biosphere exchanges.",
     )
     ecoinvent_activity_hint: str | None = Field(
         default=None,
         description=(
-            "Source-supported background activity name. It may be an exact mapping or an intentional proxy; "
+            "Source-supported technosphere background activity name. It may be an exact mapping or an intentional proxy; "
             "the relation must be stated separately in background_mapping_relation."
         ),
     )
@@ -145,7 +154,7 @@ class InventoryFlow(BaseModel):
     background_mapping_relation: Literal["exact", "proxy", "uncertain"] | None = Field(
         default=None,
         description=(
-            "How the source-supported background activity relates to the foreground exchange: exact, proxy, or uncertain. "
+            "How the source-supported technosphere activity relates to the foreground exchange: exact, proxy, or uncertain. "
             "Do not rename the foreground exchange when a proxy is used."
         ),
     )
@@ -154,6 +163,16 @@ class InventoryFlow(BaseModel):
         description="Short explanation of why the source evidence supports the exact/proxy/uncertain relationship.",
     )
     background_mapping_evidence: list[SourceEvidence] = Field(default_factory=list)
+    biosphere_search_term: str | None = Field(
+        default=None,
+        description="Canonical elementary-flow name used to search the Brightway biosphere database for biosphere exchanges.",
+    )
+    biosphere_compartment_hint: str | None = Field(
+        default=None,
+        description=(
+            "Compartment/subcompartment only when supported by the evidence, e.g. air, water, soil, natural resource, urban air close to ground."
+        ),
+    )
     notes: str | None = None
     evidence: list[SourceEvidence] = Field(default_factory=list)
 
