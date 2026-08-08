@@ -133,3 +133,33 @@ def test_same_flow_from_two_documents_merges_evidence_instead_of_duplicate_excha
     assert len(result.flows) == 1
     assert {e.source_document for e in result.flows[0].evidence} == {"paper.pdf", "supplement.docx"}
     assert any("Merged repeated evidence for flow" in warning for warning in result.assumptions_or_warnings)
+
+
+def test_same_process_name_with_conflicting_explicit_geographies_stays_separate():
+    process_map = ProcessMap(
+        source_summary="Two scenarios",
+        technology_groups=[
+            TechnologyGroup(
+                name="Electrolysis",
+                processes=[
+                    ForegroundProcess(
+                        name="PEM electrolysis",
+                        evidence_type="explicit_text",
+                        reason_for_separate_process="German scenario.",
+                        geographic_context="Germany",
+                        evidence=[SourceEvidence(source_document="de.pdf", evidence_text="PEM electrolysis in Germany.")],
+                    ),
+                    ForegroundProcess(
+                        name="PEM electrolysis",
+                        evidence_type="explicit_text",
+                        reason_for_separate_process="French scenario.",
+                        geographic_context="France",
+                        evidence=[SourceEvidence(source_document="fr.pdf", evidence_text="PEM electrolysis in France.")],
+                    ),
+                ],
+            )
+        ],
+    )
+
+    result = normalise_process_ids(process_map)
+    assert len(result.technology_groups[0].processes) == 2
