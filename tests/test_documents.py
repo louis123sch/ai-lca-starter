@@ -3,7 +3,7 @@ import io
 import fitz
 from docx import Document
 
-from ai_lca.documents import extract_docx_text, extract_pdf_text
+from ai_lca.documents import combine_document_texts, extract_docx_text, extract_pdf_text
 
 
 def test_pdf_extraction_keeps_page_markers():
@@ -37,3 +37,20 @@ def test_docx_extraction_keeps_paragraphs_and_tables_in_order():
     assert "Input | Amount" in text
     assert "Electricity | 10 kWh/kg H2" in text
     assert text.index("Methane pyrolysis") < text.index("[TABLE 1]")
+
+
+def test_multiple_documents_are_combined_as_one_provenance_tagged_corpus():
+    corpus = combine_document_texts(
+        [
+            ("paper.pdf", "[PAGE 2]\nThermal plasma methane pyrolysis is modelled."),
+            ("supplement.docx", "[TABLE 1]\nElectricity | 10 kWh/kg H2"),
+        ]
+    )
+
+    assert "[DOCUMENT paper.pdf]" in corpus
+    assert "[END DOCUMENT paper.pdf]" in corpus
+    assert "[DOCUMENT supplement.docx]" in corpus
+    assert "[END DOCUMENT supplement.docx]" in corpus
+    assert corpus.index("paper.pdf") < corpus.index("supplement.docx")
+    assert "Thermal plasma methane pyrolysis is modelled." in corpus
+    assert "Electricity | 10 kWh/kg H2" in corpus
