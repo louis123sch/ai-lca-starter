@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ai-lca-starter"
 version = "0.1.0"
-description = "Human-in-the-loop AI foreground inventory extraction and Brightway candidate matching"
+description = "Human-in-the-loop AI foreground inventory reconstruction with Brightway technosphere and biosphere matching"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "streamlit>=1.45",
