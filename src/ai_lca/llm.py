@@ -50,19 +50,21 @@ Rules:
 10. Put lifecycle/component context such as `plant construction`, `plant manufacturing`, `capital equipment`, or `operation` in `component_or_stage`, not in `name`.
 11. Use `source_label` for the concise wording appearing in the quantitative inventory source.
 12. `ecoinvent_search_term` must be a clean bare search concept, normally the canonical flow name. It must never contain lifecycle-stage text such as plant construction/capital input.
-13. If another uploaded document explicitly provides an ecoinvent/database process table, use it as BACKGROUND-MAPPING EVIDENCE only when the product-to-process link is unambiguous. In that case populate `ecoinvent_activity_hint`, `ecoinvent_location_hint`, and `background_mapping_evidence`.
-14. An explicit database table may complement a quantitative inventory in another document. Example: if the LCI table gives `Concrete 6.6e-6 m3` and a supplementary database table explicitly gives `Concrete -> Market for concrete, normal -> RoW`, keep the amount from the LCI evidence and attach the source-provided activity/location as a background mapping hint.
-15. Do NOT infer a specific material subtype when the quantitative flow is generic and the corpus provides several possible database products. Example: if the LCI says only `Steel` but a supplementary table lists high-alloyed, low-alloyed and unalloyed steel, keep the flow/search term as `steel`, leave the exact activity hint null, and flag the ambiguity if useful.
-16. If the evidence says only `electricity`, the canonical flow name must remain `electricity`. Do not turn it into low-, medium-, or high-voltage electricity unless the evidence for the foreground quantity itself supports that specificity. A separate explicit background-process table may supply an `ecoinvent_activity_hint` without changing the foreground flow name.
-17. A technical operation is not itself an exchange. Only extract material/energy/transport/output/emission flows actually stated or clearly tabulated for the modelled process.
-18. If a flow is mentioned but no amount is given, amount must be null.
-19. Keep construction/capital inputs distinct from operational inputs through `component_or_stage` while retaining each actual material/equipment exchange separately.
-20. Do not collapse explicit construction materials into a synthetic flow such as `plant construction` or `plant manufacturing`. If the source gives concrete, steel and aluminium separately, return concrete, steel and aluminium separately.
-21. Never substitute a similar but different equipment type from another source table. For example, a foreground `steam turbine` must not be assigned a source-provided `gas turbine` dataset unless the corpus explicitly states that substitution.
-22. Keep outputs/co-products distinct from inputs.
-23. Preserve the stated basis. Do not silently convert bases.
-24. Include evidence records for each flow. Populate source_document from [DOCUMENT ...] markers and page/table/section where available.
-25. The result is a proposal for human review, not an approved LCA model.
+13. If another uploaded document provides a database-process table or otherwise identifies the background datasets applied by the study, use that evidence to identify background mappings. Keep the foreground exchange identity separate from the background dataset identity.
+14. For a direct product-to-dataset correspondence, set `background_mapping_relation = exact`. Populate `ecoinvent_activity_hint`, `ecoinvent_location_hint`, and `background_mapping_evidence`.
+15. A study may intentionally use a different database activity as a PROXY for a foreground item. When the combined corpus strongly supports that interpretation, keep the foreground `name` unchanged, set `background_mapping_relation = proxy`, populate the source-supported activity/location, and explain the inference in `background_mapping_rationale`.
+16. Do not infer a proxy merely because two names are vaguely similar. Proxy status needs structural evidence from the study: for example, the foreground inventory contains an item, the supplementary explicitly lists the background datasets applied in the study, and the listed dataset is the only credible dataset corresponding to that foreground item. If the relationship is plausible but not sufficiently resolved, use `background_mapping_relation = uncertain` or leave the activity hint null.
+17. An explicit database table may complement a quantitative inventory in another document. Example: if the LCI table gives `Concrete 6.6e-6 m3` and a supplementary database table explicitly gives `Concrete -> Market for concrete, normal -> RoW`, keep the amount from the LCI evidence and attach the database activity as an exact background mapping.
+18. Do NOT infer a specific material subtype when the quantitative flow is generic and the corpus provides several possible database products. Example: if the LCI says only `Steel` but a supplementary table lists high-alloyed, low-alloyed and unalloyed steel, keep the flow/search term as `steel`; the mapping remains unresolved unless other evidence identifies which dataset was used.
+19. If the evidence says only `electricity`, the canonical foreground flow name must remain `electricity`. Do not turn it into low-, medium-, or high-voltage electricity unless the evidence for the foreground quantity itself supports that specificity. A separate background-process table may still identify the source-used electricity dataset without changing the foreground name.
+20. A technical operation is not itself an exchange. Only extract material/energy/transport/output/emission flows actually stated or clearly tabulated for the modelled process.
+21. If a flow is mentioned but no amount is given, amount must be null.
+22. Keep construction/capital inputs distinct from operational inputs through `component_or_stage` while retaining each actual material/equipment exchange separately.
+23. Do not collapse explicit construction materials into a synthetic flow such as `plant construction` or `plant manufacturing`. If the source gives concrete, steel and aluminium separately, return concrete, steel and aluminium separately.
+24. Keep outputs/co-products distinct from inputs.
+25. Preserve the stated basis. Do not silently convert bases.
+26. Include evidence records for each flow and for each background mapping. Populate source_document from [DOCUMENT ...] markers and page/table/section where available.
+27. The result is a proposal for human review, not an approved LCA model.
 """
 
 
@@ -152,7 +154,7 @@ def extract_inventory_from_text(
 
     user_prompt = (
         "Build the foreground inventory for ONLY the approved foreground processes below using the entire evidence corpus. "
-        "Combine complementary evidence across documents into the same process and flow. Extract actual material/equipment exchanges separately and keep lifecycle-stage context out of exchange/search names. Use explicit database-process tables elsewhere in the corpus as mapping hints only where the product mapping is unambiguous.\n\n"
+        "Combine complementary evidence across documents into the same process and flow. Extract actual material/equipment exchanges separately, keep lifecycle-stage context out of exchange/search names, and distinguish exact source mappings from intentional proxy datasets.\n\n"
         f"APPROVED PROCESS MAP:\n{json.dumps(approved_payload, indent=2, ensure_ascii=False)}\n\n"
     )
     if extra_instructions.strip():
