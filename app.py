@@ -129,39 +129,48 @@ if "process_map" in st.session_state:
                     for operation in process.operations:
                         st.write(f"• {operation.name}")
 
-    process_df = st.data_editor(
-        st.session_state["process_map_df"],
-        width="stretch",
-        hide_index=True,
-        num_rows="fixed",
-        disabled=[
-            "process_id",
-            "technology_group",
-            "process_name",
-            "geographic_context",
-            "temporal_context",
-            "evidence_type",
-            "confidence",
-            "reason_for_separate_process",
-            "operations_not_separate_processes",
-            "page",
-            "table",
-            "evidence_text",
-        ],
-        column_config={
-            "include": st.column_config.CheckboxColumn("Use as foreground process"),
-            "process_id": st.column_config.TextColumn("Process ID", width="small"),
-            "process_name": st.column_config.TextColumn("Foreground process", width="large"),
-            "technology_group": st.column_config.TextColumn("Technology / pathway"),
-            "operations_not_separate_processes": st.column_config.TextColumn("Operations (context only)", width="large"),
-            "reason_for_separate_process": st.column_config.TextColumn("Why this is a separate process", width="large"),
-            "evidence_text": st.column_config.TextColumn("Process evidence", width="large"),
-        },
-        key="process_map_editor",
-    )
-    st.session_state["process_map_df"] = process_df
+    process_df = st.session_state["process_map_df"]
+    if process_df.empty:
+        st.warning(
+            "No paper-supported foreground processes were identified. Nothing will be sent to ecoinvent matching; adjust the study instructions or inspect the source text before continuing."
+        )
+        selected_process_ids = []
+    else:
+        process_df = st.data_editor(
+            process_df,
+            width="stretch",
+            hide_index=True,
+            num_rows="fixed",
+            disabled=[
+                "process_id",
+                "technology_group",
+                "process_name",
+                "geographic_context",
+                "temporal_context",
+                "evidence_type",
+                "confidence",
+                "reason_for_separate_process",
+                "operations_not_separate_processes",
+                "page",
+                "table",
+                "evidence_text",
+            ],
+            column_config={
+                "include": st.column_config.CheckboxColumn("Use as foreground process"),
+                "process_id": st.column_config.TextColumn("Process ID", width="small"),
+                "process_name": st.column_config.TextColumn("Foreground process", width="large"),
+                "technology_group": st.column_config.TextColumn("Technology / pathway"),
+                "operations_not_separate_processes": st.column_config.TextColumn("Operations (context only)", width="large"),
+                "reason_for_separate_process": st.column_config.TextColumn("Why this is a separate process", width="large"),
+                "evidence_text": st.column_config.TextColumn("Process evidence", width="large"),
+            },
+            key="process_map_editor",
+        )
+        st.session_state["process_map_df"] = process_df
+        selected_process_ids = process_df.loc[
+            process_df["include"] == True, "process_id"
+        ].astype(str).tolist()  # noqa: E712
 
-    selected_process_ids = process_df.loc[process_df["include"] == True, "process_id"].astype(str).tolist()  # noqa: E712
     if st.button("2. Extract inventory for selected processes", disabled=not bool(selected_process_ids)):
         try:
             with st.spinner("Extracting exchanges only under the confirmed process map…"):
@@ -198,7 +207,7 @@ if "extraction" in st.session_state:
         disabled=["background_match_eligible", "flow_id", "process_id"],
         column_config={
             "include": st.column_config.CheckboxColumn("Search ecoinvent"),
-            "background_match_eligible": st.column_config.CheckboxColumn("Eligible", disabled=True),
+            "background_match_eligible": st.column_config.CheckboxColumn("Eligible"),
             "flow_id": st.column_config.NumberColumn("Flow ID", disabled=True),
             "process_id": st.column_config.TextColumn("Process ID", disabled=True),
             "process_name": st.column_config.TextColumn("Foreground process", width="large"),
