@@ -16,6 +16,16 @@ st.set_page_config(page_title="AI-LCA Foreground Builder", layout="wide")
 st.title("AI-LCA Foreground Builder")
 st.caption("AI maps the evidence corpus → human confirms foreground processes → AI extracts exchanges → human approves → Brightway calculates")
 
+ACTIVITY_TYPE_OPTIONS = [
+    "market",
+    "transforming",
+    "treatment",
+    "transport",
+    "construction",
+    "operation",
+    "unknown",
+]
+
 
 def process_geography(process_map, process_id: str) -> str | None:
     """Return process geography, falling back to the corpus-wide study geography."""
@@ -37,6 +47,20 @@ def evidence_location_text(evidence) -> str:
     if evidence.section:
         bits.append(evidence.section)
     return " · ".join(bits) or "Source location not identified"
+
+
+def suggested_activity_type(row) -> str:
+    """Return a soft initial ecoinvent activity-type preference for an exchange."""
+    flow_kind = str(row.get("flow_kind") or "").strip().lower()
+    direction = str(row.get("direction") or "").strip().lower()
+
+    if flow_kind == "transport":
+        return "transport"
+    if flow_kind == "waste":
+        return "treatment"
+    if direction == "input" and flow_kind in {"material", "energy", "water"}:
+        return "market"
+    return "unknown"
 
 
 with st.sidebar:
@@ -130,6 +154,7 @@ if st.button("1. Analyse evidence corpus", type="primary", disabled=not bool(sou
         st.session_state.pop("candidates", None)
         st.session_state.pop("candidate_geographies", None)
         st.session_state.pop("candidate_queries", None)
+        st.session_state.pop("candidate_activity_types", None)
     except Exception as exc:
         st.exception(exc)
 
@@ -250,6 +275,7 @@ if "process_map" in st.session_state:
             st.session_state.pop("candidates", None)
             st.session_state.pop("candidate_geographies", None)
             st.session_state.pop("candidate_queries", None)
+            st.session_state.pop("candidate_activity_types", None)
         except Exception as exc:
             st.exception(exc)
 
@@ -306,6 +332,7 @@ if "extraction" in st.session_state:
         candidate_map: dict[int, list[dict]] = {}
         candidate_geographies: dict[int, str | None] = {}
         candidate_queries: dict[int, str] = {}
+        candidate_activity_types: dict[int, str] = {}
         progress = st.progress(0.0)
         included = edited_df[
             (edited_df["include"] == True)  # noqa: E712
@@ -327,8 +354,11 @@ if "extraction" in st.session_state:
             query = str(row.get("name", "")).strip()
             process_id = str(row.get("process_id", "")).strip()
             geography = process_geography(process_map, process_id) if process_map else None
+            activity_type = suggested_activity_type(row)
+            unit = str(row.get("unit") or "").strip() or None
             candidate_geographies[flow_id] = geography
             candidate_queries[flow_id] = query
+            candidate_activity_types[flow_id] = activity_type
             try:
                 candidate_map[flow_id] = search_candidates(
                     project_name=project_name,
@@ -336,6 +366,8 @@ if "extraction" in st.session_state:
                     query=query,
                     location_hint=geography,
                     limit=candidate_limit,
+                    unit=unit,
+                    activity_type_hint=activity_type,
                 )
             except Exception as exc:
                 candidate_map[flow_id] = [{"error": str(exc)}]
@@ -343,37 +375,58 @@ if "extraction" in st.session_state:
         st.session_state["candidates"] = candidate_map
         st.session_state["candidate_geographies"] = candidate_geographies
         st.session_state["candidate_queries"] = candidate_queries
+        st.session_state["candidate_activity_types"] = candidate_activity_types
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
     st.subheader("Candidate background processes")
     st.caption(
-        "The extracted flow name is only the starting search query. Edit the query for any flow and search again without changing the evidence-backed foreground inventory. Evidence-derived geography remains a soft ranking signal."
+        "Search controls are independent of the foreground inventory. Edit the query or preferred ecoinvent activity type and rerun only that flow. Results are ranked using reference-product similarity, unit, evidence-derived geography and activity type."
     )
     mapping_rows = []
     inv_df = st.session_state["inventory_df"]
     candidate_geographies = st.session_state.get("candidate_geographies", {})
     candidate_queries = st.session_state.setdefault("candidate_queries", {})
+    candidate_activity_types = st.session_state.setdefault("candidate_activity_types", {})
 
     for flow_id, candidates in list(st.session_state["candidates"].items()):
         matching = inv_df[inv_df["flow_id"] == flow_id]
-        flow_name = matching.iloc[0]["name"] if not matching.empty else f"Flow {flow_id}"
-        process_name = matching.iloc[0]["process_name"] if not matching.empty else "Unknown process"
-        geography = candidate_geographies.get(flow_id)
-        st.markdown(f"### {flow_name}")
-        context = f"Foreground process: {process_name}"
-        if geography:
-            context += f" | Evidence-derived geography: {geography}"
-        else:
-            context += " | Evidence-derived geography: not identified"
-        st.caption(context)
+        if matching.empty:
+            continue
 
-        query_col, search_col = st.columns([5, 1])
+        row = matching.iloc[0]
+        flow_name = str(row.get("name") or f"Flow {flow_id}")
+        process_name = str(row.get("process_name") or "Unknown process")
+        unit = str(row.get("unit") or "").strip()
+        geography = candidate_geographies.get(flow_id)
+
+        st.markdown(f"### {flow_name}")
+        context_bits = [f"Foreground process: {process_name}"]
+        if unit:
+            context_bits.append(f"foreground unit: {unit}")
+        context_bits.append(
+            f"evidence geography: {geography}" if geography else "evidence geography: not identified"
+        )
+        st.caption(" | ".join(context_bits))
+
+        current_type = candidate_activity_types.get(flow_id, suggested_activity_type(row))
+        if current_type not in ACTIVITY_TYPE_OPTIONS:
+            current_type = "unknown"
+
+        query_col, type_col, search_col = st.columns([5, 2, 1.4])
         with query_col:
             edited_query = st.text_input(
                 "Ecoinvent search query",
                 value=candidate_queries.get(flow_id, flow_name),
                 key=f"search_query_{flow_id}",
-                help="This changes only the Brightway/ecoinvent search. It does not alter the extracted LCI flow name or evidence.",
+                help="Changes only candidate retrieval; the evidence-backed foreground flow name is unchanged.",
+            )
+        with type_col:
+            edited_activity_type = st.selectbox(
+                "Activity type",
+                ACTIVITY_TYPE_OPTIONS,
+                index=ACTIVITY_TYPE_OPTIONS.index(current_type),
+                key=f"activity_type_{flow_id}",
+                help="Soft preference used to rank/search ecoinvent activities. 'Market' is usually appropriate when buying a material or energy carrier from the background system.",
             )
         with search_col:
             st.write("")
@@ -387,6 +440,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
 
         if search_again:
             candidate_queries[flow_id] = edited_query.strip()
+            candidate_activity_types[flow_id] = edited_activity_type
             try:
                 st.session_state["candidates"][flow_id] = search_candidates(
                     project_name=project_name,
@@ -394,17 +448,21 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                     query=edited_query.strip(),
                     location_hint=geography,
                     limit=candidate_limit,
+                    unit=unit or None,
+                    activity_type_hint=edited_activity_type,
                 )
             except Exception as exc:
                 st.session_state["candidates"][flow_id] = [{"error": str(exc)}]
             st.session_state["candidate_queries"] = candidate_queries
+            st.session_state["candidate_activity_types"] = candidate_activity_types
             st.session_state.pop(f"mapping_{flow_id}", None)
             st.rerun()
 
         current_query = candidate_queries.get(flow_id, flow_name)
+        current_type = candidate_activity_types.get(flow_id, current_type)
 
         if not candidates:
-            st.warning("No candidates returned. Edit the search query above and search again.")
+            st.warning("No candidates returned. Edit the search controls above and search again.")
             continue
         if "error" in candidates[0]:
             st.error(candidates[0]["error"])
@@ -412,22 +470,40 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
 
         display = pd.DataFrame(candidates)
         display.insert(0, "rank", range(1, len(display) + 1))
+        display_columns = [
+            "rank",
+            "match_score",
+            "name",
+            "reference_product",
+            "location",
+            "unit",
+            "activity_type",
+            "match_reasons",
+        ]
         st.dataframe(
-            display[["rank", "name", "reference_product", "location", "unit", "database", "id", "code"]],
+            display[[col for col in display_columns if col in display.columns]],
             width="stretch",
             hide_index=True,
+        )
+
+        top = candidates[0]
+        st.caption(
+            f"Top-ranked candidate: {top['name']} | {top['reference_product']} | {top['location']} | {top['unit']}"
         )
 
         labels = [
             f"{c['name']} | {c['reference_product']} | {c['location']} | {c['unit']}"
             for c in candidates
         ]
+        no_selection = "— no selection —"
         choice = st.selectbox(
             "Approve mapping",
-            ["— no selection —"] + labels,
+            labels + [no_selection],
+            index=0,
             key=f"mapping_{flow_id}",
+            help="The highest-ranked candidate is pre-selected. Review the score/reasons and change it or choose no selection if needed.",
         )
-        if choice != "— no selection —":
+        if choice != no_selection:
             chosen_index = labels.index(choice)
             chosen = candidates[chosen_index]
             mapping_rows.append(
@@ -435,6 +511,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                     "flow_id": flow_id,
                     "flow_name": flow_name,
                     "search_query": current_query,
+                    "activity_type_preference": current_type,
                     "process_name": process_name,
                     "evidence_geography": geography,
                     **chosen,
