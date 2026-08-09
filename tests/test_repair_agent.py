@@ -14,9 +14,15 @@ def test_repair_validator_rejects_removing_prompt_invariant():
     current = Path("src/ai_lca/llm.py").read_text()
     invariant = REQUIRED_PROMPT_INVARIANTS[-1]
     assert invariant in current.casefold()
+
+    # Remove the actual lower-case invariant text present in FLOW_SYSTEM_PROMPT.
     modified = current.replace(
-        "Do not reclassify such tabulated components as background subprocesses.",
-        "Keep tabulated components attached to the assessed foreground system.",
+        "do not reclassify such tabulated components as background subprocesses",
+        "keep tabulated components attached to the assessed foreground system",
+        1,
     )
+    assert modified != current
+    assert invariant not in modified.casefold()
+
     with pytest.raises(ValueError, match="required prompt invariants"):
         _validate_replacement(current, modified)
