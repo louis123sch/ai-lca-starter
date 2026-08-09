@@ -1,9 +1,21 @@
+import base64
 import io
 
 import fitz
 from docx import Document
 
-from ai_lca.documents import extract_document_text, extract_docx_text, extract_pdf_text
+from ai_lca.documents import (
+    combine_document_evidence,
+    extract_document_text,
+    extract_docx_text,
+    extract_docx_visual_assets,
+    extract_pdf_text,
+)
+
+
+_ONE_PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 def test_pdf_extraction_keeps_page_markers():
@@ -30,6 +42,22 @@ def test_docx_extraction_keeps_paragraph_and_table_markers():
     assert "Natural gas input" in text
     assert "[TABLE 1]" in text
     assert "Electricity\t5 kWh" in text
+
+
+def test_docx_visual_extraction_keeps_caption_context():
+    document = Document()
+    document.add_paragraph("Inventory figure follows")
+    document.add_picture(io.BytesIO(_ONE_PIXEL_PNG))
+    document.add_paragraph("Figure 1: LCI values and material inputs")
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    assets, warnings = extract_docx_visual_assets(buffer.getvalue(), filename="supplement.docx")
+    assert not warnings
+    assert len(assets) == 1
+    assert assets[0].document == "supplement.docx"
+    assert assets[0].mime_type == "image/png"
+    assert "LCI values" in (assets[0].context or "")
 
 
 def test_document_dispatch_accepts_docx():
@@ -66,3 +94,17 @@ def test_combined_documents_keep_document_markers():
     assert "[DOCUMENT: supplement.docx]" in text
     assert "Main paper inventory" in text
     assert "Supplementary inventory" in text
+
+
+def test_combined_evidence_returns_text_and_visual_assets():
+    document = Document()
+    document.add_paragraph("Supplementary inventory")
+    document.add_picture(io.BytesIO(_ONE_PIXEL_PNG))
+    document.add_paragraph("Figure 2: material inventory table")
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    text, assets, warnings = combine_document_evidence([("supplement.docx", buffer.getvalue())])
+    assert "[DOCUMENT: supplement.docx]" in text
+    assert len(assets) == 1
+    assert not warnings
