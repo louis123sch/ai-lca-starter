@@ -1,0 +1,57 @@
+{
+  "benchmark_id": "gerloff_2021",
+  "scope": "Unseen-paper validation of Gerloff (2021): three 1 MW electrolysis foreground systems, exact operating and manufacturing-energy inventory, grouped capital-component coverage, and representative detailed capital quantities reported only inside supplementary embedded figures.",
+  "context": {
+    "functional_unit_terms": ["1 kg h2"],
+    "system_boundary": "cradle to grave",
+    "reference_geography": "Germany"
+  },
+  "processes": [
+    {"key": "aec", "name": "Alkaline electrolysis", "aliases": ["AEC", "alkaline electrolysis", "alkaline water electrolysis"]},
+    {"key": "pemec", "name": "Polymer electrolyte membrane electrolysis", "aliases": ["PEMEC", "polymer electrolyte membrane electrolysis", "PEM water electrolysis"]},
+    {"key": "soec", "name": "Solid oxide electrolysis cell", "aliases": ["SOEC", "solid oxide electrolysis cell", "solid oxide electrolysis"]}
+  ],
+  "forbidden_process_terms": [
+    "water purifier",
+    "control panel",
+    "transformer",
+    "compressor",
+    "heat exchanger",
+    "gas separator",
+    "water-gas separator",
+    "container",
+    "foundation",
+    "bipolar plate",
+    "electrode",
+    "membrane",
+    "stack",
+    "balance of plant",
+    "bop",
+    "water pump",
+    "heater",
+    "mixer",
+    "splitter",
+    "separator",
+    "tubing",
+    "gas purification",
+    "ion exchanger"
+  ],
+  "forbidden_foreground_name_terms": [
+    "market for",
+    "market group for",
+    "electricity production",
+    "sheet rolling",
+    "wire drawing",
+    "reinforcing steel production",
+    "electronics production",
+    "injection moulding",
+    "extrusion,",
+    "welding,"
+  ],
+  "benchmark_design_notes": [
+    "The source-facing fixtures deliberately mirror the current application's text extraction: PDF text plus machine-readable DOCX paragraphs/tables. The supplementary Figures 1-5 are embedded images and are therefore absent from the source fixture under the current DOCX ingestion path.",
+    "The gold standard nevertheless includes 30 representative quantities from those embedded supplementary figures. This is intentional: the first blind run should reveal whether image-only LCI is lost by the current end-to-end ingestion path rather than silently granting the extractor OCR-derived text it would not receive in the application.",
+    "Capital equipment names are treated as component/stage information within the three technology foreground systems, not as independent foreground production processes, to avoid redundant Brightway searches for each physical item."
+  ],
+  "flows_file": "flows.csv"
+}
