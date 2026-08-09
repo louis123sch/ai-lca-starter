@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
 import os
+from typing import Literal
 
 from openai import OpenAI
+from pydantic import BaseModel, ConfigDict, Field
 
+from .documents import VisualAsset, combine_document_evidence
 from .models import FlowExtraction, ForegroundStructure, InventoryExtraction
 
 
@@ -41,13 +45,136 @@ Rules:
 7. Keep outputs/co-products distinct from inputs and elementary emissions.
 8. Do not duplicate the same flow merely because it appears in prose and a table; use the clearest supporting evidence and warn about conflicting values.
 9. Component groups and life-cycle stages (for example stack, BoP, construction, manufacturing, operation, maintenance, transport, replacement, and end-of-life) do not require new process IDs. If the locked structure represents the assessed product system as one process, attach source-supported flows from those inventory sections to that process while preserving their stated basis and evidence.
-10. Include a short evidence_text snippet for every flow. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
-11. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
+10. Treat [VISUAL EVIDENCE: ...] blocks exactly like source evidence: use only what is visibly transcribed there and preserve the asset/document provenance in evidence_text/notes. Do not infer values that the visual-evidence stage did not transcribe.
+11. Include a short evidence_text snippet for every flow. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
+12. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
 """
+
+
+VISUAL_SYSTEM_PROMPT = """You are a document-evidence transcription stage for life-cycle assessment documents.
+Your task is to read supplied figures/pages and transcribe visible evidence faithfully BEFORE any LCA interpretation occurs.
+
+Rules:
+1. Extract visible tables, labels, quantities, units, component/material names, process/configuration names, system-boundary labels, and other evidence that could matter to an LCI reconstruction.
+2. Do not decide the foreground process hierarchy and do not map anything to ecoinvent. Transcribe what is visibly present.
+3. Never invent obscured/missing values. If a row/value is unreadable, say so in warnings instead of guessing.
+4. Preserve row associations: a quantity must remain attached to the material/component it visibly belongs to.
+5. Preserve ecoinvent dataset names if they are visibly printed, but label them as background mapping text rather than silently converting them into foreground names.
+6. Mark decorative photographs/logos/irrelevant figures as not relevant.
+7. Return exactly one result for every labelled asset supplied by the user.
+"""
+
+
+class VisualEvidenceItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str
+    relevant_to_lca: bool
+    evidence_type: Literal["table", "diagram", "chart", "page", "figure", "other"] = "figure"
+    evidence_text: str = Field(description="Faithful visible transcription; use compact table-like lines where appropriate.")
+    warnings: list[str] = Field(default_factory=list)
+
+
+class VisualEvidenceBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[VisualEvidenceItem] = Field(default_factory=list)
 
 
 def _client(api_key: str | None = None) -> OpenAI:
     return OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+
+
+def _visual_data_url(asset: VisualAsset) -> str:
+    encoded = base64.b64encode(asset.data).decode("ascii")
+    return f"data:{asset.mime_type};base64,{encoded}"
+
+
+def transcribe_visual_evidence(
+    assets: list[VisualAsset],
+    *,
+    model: str | None = None,
+    api_key: str | None = None,
+    batch_size: int = 4,
+) -> tuple[str, list[str]]:
+    """Convert visual document evidence into provenance-tagged machine-readable text."""
+    if not assets:
+        return "", []
+    chosen_model = model or os.getenv("OPENAI_VISION_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    blocks: list[str] = []
+    warnings: list[str] = []
+    client = _client(api_key)
+
+    for start in range(0, len(assets), max(1, batch_size)):
+        batch = assets[start : start + max(1, batch_size)]
+        content: list[dict] = [
+            {
+                "type": "text",
+                "text": (
+                    "Transcribe the labelled document assets below. Return one item per asset_id. "
+                    "Nearby context is supplied only to orient the image; visible image content is the authority."
+                ),
+            }
+        ]
+        for asset in batch:
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"ASSET_ID: {asset.asset_id}\nDOCUMENT: {asset.document}\n"
+                        f"SOURCE_TYPE: {asset.source_type}\nNEARBY_CONTEXT: {asset.context or 'None'}"
+                    ),
+                }
+            )
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _visual_data_url(asset), "detail": "high"},
+                }
+            )
+
+        completion = client.beta.chat.completions.parse(
+            model=chosen_model,
+            messages=[
+                {"role": "system", "content": VISUAL_SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ],
+            response_format=VisualEvidenceBatch,
+        )
+        message = completion.choices[0].message
+        if getattr(message, "refusal", None):
+            warnings.append(f"Vision model refused a visual evidence batch: {message.refusal}")
+            continue
+        if message.parsed is None:
+            warnings.append("Vision model returned no parsed visual evidence for a batch.")
+            continue
+        by_id = {item.asset_id: item for item in message.parsed.items}
+        for asset in batch:
+            item = by_id.get(asset.asset_id)
+            if item is None:
+                warnings.append(f"No visual transcription returned for {asset.document}/{asset.asset_id}.")
+                continue
+            warnings.extend(f"{asset.document}/{asset.asset_id}: {w}" for w in item.warnings)
+            if not item.relevant_to_lca or not item.evidence_text.strip():
+                continue
+            blocks.append(
+                f"[VISUAL EVIDENCE: {asset.document} | {asset.asset_id} | {item.evidence_type}]\n"
+                f"Nearby context: {asset.context or 'None'}\n"
+                f"{item.evidence_text.strip()}"
+            )
+    return "\n\n".join(blocks), warnings
+
+
+def augment_text_with_visual_evidence(
+    text: str,
+    assets: list[VisualAsset],
+    *,
+    model: str | None = None,
+    api_key: str | None = None,
+) -> tuple[str, list[str]]:
+    visual_text, warnings = transcribe_visual_evidence(assets, model=model, api_key=api_key)
+    if not visual_text:
+        return text, warnings
+    return f"{text.rstrip()}\n\n[BEGIN TRANSCRIBED VISUAL EVIDENCE]\n{visual_text}\n[END TRANSCRIBED VISUAL EVIDENCE]", warnings
 
 
 def identify_foreground_structure(
@@ -93,12 +220,7 @@ def extract_inventory_from_text(
     api_key: str | None = None,
     extra_instructions: str = "",
 ) -> InventoryExtraction:
-    """Two-pass, schema-first foreground extraction using OpenAI Structured Outputs.
-
-    Pass 1 identifies the actual process hierarchy and study context. Pass 2 extracts
-    evidence-backed flows but is constrained to those process IDs. This prevents a
-    flow-extraction pass from silently creating extra subprocesses.
-    """
+    """Two-pass, schema-first foreground extraction using OpenAI Structured Outputs."""
     text = (text or "").strip()
     if not text:
         raise ValueError("No source text supplied")
@@ -144,3 +266,36 @@ def extract_inventory_from_text(
         processes=structure.processes,
         flows=message.parsed.flows,
     )
+
+
+def extract_inventory_from_documents(
+    documents: list[tuple[str, bytes]],
+    *,
+    model: str | None = None,
+    api_key: str | None = None,
+    extra_instructions: str = "",
+    max_visual_assets: int = 24,
+) -> InventoryExtraction:
+    """Multimodal document path: native text + visual evidence -> existing two-pass LCA reasoning."""
+    text, assets, ingestion_warnings = combine_document_evidence(
+        documents,
+        max_visual_assets=max_visual_assets,
+    )
+    enriched_text, vision_warnings = augment_text_with_visual_evidence(
+        text,
+        assets,
+        model=model,
+        api_key=api_key,
+    )
+    extraction = extract_inventory_from_text(
+        enriched_text,
+        model=model,
+        api_key=api_key,
+        extra_instructions=extra_instructions,
+    )
+    warnings = list(
+        dict.fromkeys(
+            extraction.assumptions_or_warnings + ingestion_warnings + vision_warnings
+        )
+    )
+    return extraction.model_copy(update={"assumptions_or_warnings": warnings})
