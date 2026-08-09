@@ -13,8 +13,12 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from .documents import combine_document_texts
 from .models import InventoryExtraction
+
+load_dotenv()
 
 BENCHMARK_EXTRA_INSTRUCTIONS = """Reconstruct only the foreground LCI actually modeled in the study.
 Prioritize goal/scope, system-boundary figures, inventory-analysis sections, and explicit LCI tables over technology-review prose.
