@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+      actions: write
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: gpt-5-mini
@@ -61,3 +62,8 @@ jobs:
           path: benchmark_runs/afzal_2023
           if-no-files-found: warn
           retention-days: 30
+      - name: Advance to Benchmark 006
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run benchmark-006.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
