@@ -1,0 +1,15 @@
+[DOCUMENT: Afzal et al. 2023, Green Chemistry 25, 5068-5085]
+
+The paper develops detailed process models and TEA for four Feedstock-Product cases: MPW-methanol, MPW-hydrogen, MSW-methanol, and MSW-hydrogen. These four process-model variants are not all foreground LCA systems.
+
+The dedicated Life cycle assessment section explicitly states that an LCA was conducted for both the MPW-methanol and MPW-hydrogen processes. TRACI 2.1 (US 2008), AWARE, ecoinvent 3.3 background data and SimaPro were used. The LCA uses a cradle-to-gate approach from MPW curbside collection to the final gasification product. Manufacturing of the original plastic feedstock and use of the produced chemicals are excluded. Credits are given for co-products.
+
+The MFI supply-chain analysis discussed immediately before the LCA covers all four MPW/MSW process cases; do not confuse those MFI cases with the two systems explicitly assessed in the full LCA.
+
+For MPW-methanol, the LCA contribution analysis identifies process emissions, cooling water, boiler feed water, natural gas, MPW feedstock preparation/collection and sorting, catalysts, infrastructure, electricity, steam co-product credit, ash disposal and wastewater. The paper states that natural gas, MPW preparation and electricity are major contributors and that steam co-generation provides avoided-emission credit.
+
+For MPW-hydrogen, the LCA contribution analysis identifies process emissions, cooling water, boiler feed water, natural gas, MPW feedstock preparation/collection and sorting, catalysts, infrastructure, steam co-product credit and electricity co-product credit. Natural gas for the gasification reactors and MPW feedstock preparation dominate many categories. Co-product credits from generated steam and electricity are explicitly included.
+
+Table S20 reports LCA impact results for MPW-methanol and MPW-hydrogen only. The reported LCA global warming potentials are 0.7 kg CO2e per kg methanol and 10.8 kg CO2e per kg hydrogen. These impact results are validation context, not foreground LCI amounts.
+
+The process-model sections include internal gasifier, tar reformer, steam reformer, water-gas-shift, pressure-swing adsorption, methanol synthesis and distillation equipment. These are unit operations within the assessed product systems and should not automatically become separate foreground LCA processes unless separately modelled as foreground activities.
