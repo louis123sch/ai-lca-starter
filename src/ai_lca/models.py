@@ -10,6 +10,10 @@ class SourceEvidence(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document: str | None = Field(
+        default=None,
+        description="Source document name when [DOCUMENT: ...] markers are available.",
+    )
     page: int | None = Field(
         default=None,
         description="PDF page number if explicitly available from [PAGE N] markers.",
@@ -36,6 +40,10 @@ class StudyContext(BaseModel):
         description="Country/region intended for operation, only when explicit or strongly supported by the source.",
     )
     geography_basis: Literal["explicit", "inferred", "not_identified"] = "not_identified"
+    additional_geographies: list[str] = Field(
+        default_factory=list,
+        description="Additional country/region scenarios explicitly assessed beyond the primary/reference geography.",
+    )
     geography_rationale: str | None = Field(
         default=None,
         description="Why this geography was extracted or inferred; must not add unsupported facts.",
