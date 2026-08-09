@@ -1,5 +1,9 @@
+import io
+
 import fitz
-from ai_lca.documents import extract_pdf_text
+from docx import Document
+
+from ai_lca.documents import extract_document_text, extract_docx_text, extract_pdf_text
 
 
 def test_pdf_extraction_keeps_page_markers():
@@ -10,3 +14,27 @@ def test_pdf_extraction_keeps_page_markers():
     text = extract_pdf_text(pdf_bytes)
     assert "[PAGE 1]" in text
     assert "Nickel input" in text
+
+
+def test_docx_extraction_keeps_paragraph_and_table_markers():
+    document = Document()
+    document.add_paragraph("Natural gas input: 1.2 kg")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Electricity"
+    table.cell(0, 1).text = "5 kWh"
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    text = extract_docx_text(buffer.getvalue())
+    assert "[PARAGRAPH 1]" in text
+    assert "Natural gas input" in text
+    assert "[TABLE 1]" in text
+    assert "Electricity\t5 kWh" in text
+
+
+def test_document_dispatch_accepts_docx():
+    document = Document()
+    document.add_paragraph("Hydrogen production")
+    buffer = io.BytesIO()
+    document.save(buffer)
+    assert "Hydrogen production" in extract_document_text(buffer.getvalue(), "paper.docx")

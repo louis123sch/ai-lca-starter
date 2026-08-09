@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
+
 import bw2data as bd
 
 
@@ -34,10 +35,15 @@ def search_candidates(
     project_name: str,
     database_name: str,
     query: str,
-    locations: Iterable[str] | None = None,
+    preferred_locations: Iterable[str] | None = None,
     limit: int = 12,
 ) -> list[dict]:
-    """Return real Brightway/ecoinvent activities; never fabricate a candidate."""
+    """Return real Brightway/ecoinvent activities with an optional soft geography boost.
+
+    Geography never filters candidates out. When the paper provides an operational
+    geography, matching ecoinvent locations are moved upward while Brightway's search
+    order is otherwise retained.
+    """
     set_project(project_name)
     if database_name not in bd.databases:
         raise KeyError(f"Database '{database_name}' not found in Brightway project '{project_name}'")
@@ -47,20 +53,13 @@ def search_candidates(
     if not query:
         return []
 
-    collected = []
-    seen: set[tuple] = set()
-    location_list = [x.strip() for x in (locations or []) if x and x.strip()]
+    expanded_limit = max(limit * 3, 20)
+    results = list(db.search(query, limit=expanded_limit))
+    preferred = {x.strip() for x in (preferred_locations or []) if x and x.strip()}
 
-    if location_list:
-        per_location_limit = max(limit, 5)
-        for location in location_list:
-            results = db.search(query, limit=per_location_limit, filter={"location": location})
-            for act in results:
-                key = (act.get("database"), act.get("code"))
-                if key not in seen:
-                    seen.add(key)
-                    collected.append(act)
-    else:
-        collected = list(db.search(query, limit=limit))
+    if preferred:
+        indexed = list(enumerate(results))
+        indexed.sort(key=lambda pair: (0 if pair[1].get("location", "") in preferred else 1, pair[0]))
+        results = [activity for _, activity in indexed]
 
-    return [_activity_to_dict(act) for act in collected[:limit]]
+    return [_activity_to_dict(act) for act in results[:limit]]
