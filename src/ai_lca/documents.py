@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator
 
 import fitz  # PyMuPDF
 from docx import Document
@@ -85,3 +85,20 @@ def extract_document_text(file_bytes: bytes, filename: str) -> str:
     if suffix == ".docx":
         return extract_docx_text(file_bytes)
     raise ValueError("Unsupported document type. Upload a PDF or DOCX file.")
+
+
+def combine_document_texts(documents: Iterable[tuple[str, bytes]]) -> str:
+    """Extract and combine multiple source documents with explicit document markers.
+
+    Document markers make page/paragraph provenance unambiguous when a paper and
+    supplementary files are analysed together.
+    """
+    chunks: list[str] = []
+    for filename, file_bytes in documents:
+        filename = (filename or "source").strip() or "source"
+        text = extract_document_text(file_bytes, filename)
+        chunks.append(f"[DOCUMENT: {filename}]\n{text}")
+    combined = "\n\n".join(chunks).strip()
+    if not combined:
+        raise ValueError("No readable source documents were supplied")
+    return combined
