@@ -38,16 +38,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          fetch_runs() {
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100"
+          }
+
           run_exists_for_head() {
             local name="$1"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
-              --jq --arg NAME "$name" '[.workflow_runs[] | select(.name == $NAME)] | length' | grep -qv '^0$'
+            fetch_runs | jq -e --arg NAME "$name" 'any(.workflow_runs[]; .name == $NAME)' >/dev/null
           }
 
           successful_for_head() {
             local name="$1"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
-              --jq --arg NAME "$name" '[.workflow_runs[] | select(.name == $NAME and .status == "completed" and .conclusion == "success")] | length' | grep -qv '^0$'
+            fetch_runs | jq -e --arg NAME "$name" 'any(.workflow_runs[]; .name == $NAME and .status == "completed" and .conclusion == "success")' >/dev/null
           }
 
           dispatch_if_available_and_not_run() {
