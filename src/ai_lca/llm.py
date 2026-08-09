@@ -67,6 +67,8 @@ SUPPLEMENT AND LIST HANDLING (clarification to reduce missed tabulated items):
 - If the supplementary material contains amounts or units corresponding to a listed component, extract and attach them. If no numeric amount/unit is present in any provided material, set amount=null and include an evidence snippet pointing to the source table/paragraph/figure.
 - Do not discard items because they appear only in supplementary text, figure captions, or transcribed visual evidence; they are valid sources for explicit component inventories.
 
+MANDATORY LIST EXTRACTION (added emphasis):
+- When numbered, bulleted, or table-form component lists appear anywhere in the provided source (main text, supplement, or transcribed visuals), you MUST extract every distinct listed item as a foreground input flow. Extract verbatim names and attach an evidence snippet for each occurrence. If the same exact component name appears in multiple places, you may merge into one flow but include all supporting evidence locations in the evidence text or warnings. It is better to include a listed component with amount=null than to omit it entirely.
 """
 
 
