@@ -77,6 +77,19 @@ def extract_docx_text(docx_bytes: bytes) -> str:
     return combined
 
 
+def extract_text_fixture(text_bytes: bytes) -> str:
+    """Read a UTF-8 text fixture used by private regression benchmarks."""
+    if not text_bytes:
+        raise ValueError("Text fixture is empty")
+    try:
+        text = text_bytes.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise ValueError("Text fixture must be UTF-8 encoded") from exc
+    if not text:
+        raise ValueError("No readable text was found in the text fixture")
+    return text
+
+
 def extract_document_text(file_bytes: bytes, filename: str) -> str:
     """Dispatch supported source documents to the appropriate local extractor."""
     suffix = Path(filename or "").suffix.lower()
@@ -84,7 +97,9 @@ def extract_document_text(file_bytes: bytes, filename: str) -> str:
         return extract_pdf_text(file_bytes)
     if suffix == ".docx":
         return extract_docx_text(file_bytes)
-    raise ValueError("Unsupported document type. Upload a PDF or DOCX file.")
+    if suffix == ".txt":
+        return extract_text_fixture(file_bytes)
+    raise ValueError("Unsupported document type. Use PDF, DOCX, or UTF-8 TXT.")
 
 
 def combine_document_texts(documents: Iterable[tuple[str, bytes]]) -> str:
