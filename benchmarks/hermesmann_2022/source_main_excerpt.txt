@@ -1,0 +1,122 @@
+[PAGE 3]
+Hermesmann and Müller consider four hydrogen production technologies: steam methane reforming (SMR), steam methane reforming with carbon capture and storage (SMR-CCS), methane pyrolysis (MP), and polymer electrolyte membrane electrolysis (PEMEL). The study considers nine process configurations in total.
+
+[PAGE 4]
+TECHNOLOGY REVIEW — NOT THE HARMONIZED LCI TABLE.
+The SMR process description discusses feed pre-treatment, steam reforming, water-gas shift and final purification by pressure swing adsorption. It also discusses possible catalysts such as nickel, Ni/Al2O3, Ru/ZrO2, Fe/Cr, Co/Mo and CuO/ZnO. These review details describe the technology and must not automatically be treated as separate foreground LCI processes or quantified inventory flows.
+
+[PAGE 6]
+TECHNOLOGY REVIEW — NOT THE HARMONIZED LCI TABLE.
+The methane-pyrolysis review describes methane cleavage, removal of solid carbon, and gas purification. It discusses plasma, packed-bed, fluidized-bed, monolithic, liquid-bubble-column and moving-bed reactor concepts and catalyst families including nickel, iron, cobalt, carbonaceous materials and molten media. The LCA itself later selects a liquid bubble column reactor using tin as molten medium.
+
+[PAGE 8]
+TECHNOLOGY REVIEW — NOT THE HARMONIZED LCI TABLE.
+The PEM electrolysis review describes a polymer electrolyte, electrodes, porous transport layers and bipolar plates and mentions iridium, platinum, titanium, carbon paper and Nafion. The inventory values used in the LCA are given later in Table 4.
+
+[PAGE 10]
+3. LIFE CYCLE ASSESSMENT — GOAL AND SCOPE
+The LCA compares four H2 production processes: SMR, SMR-CCS, methane pyrolysis and PEM electrolysis, with nine different configurations. The scope is cradle-to-gate: resource extraction through hydrogen production at the factory gate. Hydrogen transport and storage after production are omitted. The functional unit is 1 kg H2 at 30 bar pressure available at the production site.
+
+Foreground configurations represented by the study:
+- SMR
+- SMR-CCS with 56% capture
+- SMR-CCS with 90% capture
+- MP-H2: methane pyrolysis with heat supplied from hydrogen
+- MP-C: methane pyrolysis with heat supplied from carbon
+- MP-NG: methane pyrolysis with heat supplied from natural gas
+- MP-E: methane pyrolysis with heat supplied from electricity
+- PEMEL today
+- PEMEL future
+
+[PAGE 11]
+3.2 INVENTORY ANALYSIS
+The paper states that foreground and background systems are distinguished. LCI data were derived from literature and, where incomplete, supplemented with ecoinvent v3.6. The in- and output data were mathematically normalized to the functional unit of 1 kg H2.
+
+TABLE 2 — LCI DATA OF SMR-BASED HYDROGEN PRODUCTION
+Columns: flow | unit | SMR | SMR-CCS (56%) | SMR-CCS (90%)
+INPUT FLOWS
+Natural gas | m3 | 4.85 | 5.01 | 5.33
+Process water | kg | 6.64 | 6.80 | 4.68
+Cooling water | m3 | 0.38 | 0.25 | 1.18
+OUTPUT FLOWS
+Hydrogen | kg | 1.00 | 1.00 | 1.00
+Electricity | kWh | 1.10 | 0.17 | 0.05
+Wastewater | m3 | 1.72e-03 | 1.79e-03 | 1.83e-03
+EMISSIONS TO AIR
+Carbon dioxide | kg | 9.00 | 4.12 | 0.99
+Nitrogen | kg | 16.41 | 17.91 | 20.84
+Oxygen | kg | 0.31 | 0.35 | 0.41
+Water | kg | 2.93 | 3.18 | 1.33
+CONSTRUCTION MATERIALS
+Concrete | m3 | 6.60e-06 | 6.60e-06 | 6.60e-06
+Steel | kg | 5.06e-03 | 5.06e-03 | 5.06e-03
+Aluminum | kg | 4.17e-05 | 4.17e-05 | 4.17e-05
+Cast iron | kg | 6.18e-05 | 6.18e-05 | 6.18e-05
+Steam turbine | unit | 7.90e-10 | 7.90e-10 | 7.90e-10
+
+TABLE 3 — LCI DATA OF MP-BASED HYDROGEN PRODUCTION
+Columns: flow | unit | MP-H2 | MP-NG | MP-C | MP-E
+INPUT FLOWS
+Natural gas | m3 | 7.44 | 6.70 | 5.72 | 5.72
+Electricity | kWh | 1.67 | 1.28 | 1.28 | 10.29
+OUTPUT FLOWS
+Hydrogen | kg | 1.00 | 1.00 | 1.00 | 1.00
+Carbon | kg | 3.91 | 3.00 | 2.06 | 3.00
+EMISSIONS TO AIR
+Carbon dioxide | kg | - | 1.73 | 3.44 | -
+CONSTRUCTION MATERIALS
+Palladium | kg | 1.10e-05 | 8.45e-06 | 8.45e-06 | 8.45e-06
+Copper | kg | 7.33e-06 | 5.63e-06 | 5.63e-06 | 5.63e-06
+Low alloyed steel | kg | 2.59e-03 | 1.99e-03 | 1.99e-03 | 1.99e-03
+High alloyed steel | kg | 5.07e-04 | 3.89e-04 | 3.89e-04 | 3.89e-04
+Silica sand | kg | 8.04e-05 | 6.18e-05 | 6.18e-05 | 6.18e-05
+Tin | kg | 3.36e-02 | 2.58e-02 | 2.58e-02 | 2.58e-02
+Silicon carbide | kg | 4.20e-06 | 3.23e-06 | 3.23e-06 | 3.23e-06
+
+TABLE 4 — LCI DATA OF PEMEL-BASED HYDROGEN PRODUCTION
+Columns: flow | unit | PEMEL today | PEMEL future
+INPUT FLOWS
+Electricity | kWh | 55.00 | 45.00
+Deionized water | kg | 12.00 | 12.00
+OUTPUT FLOWS
+Hydrogen | kg | 1.00 | 1.00
+Oxygen | kg | 8.00 | 8.00
+CONSTRUCTION MATERIALS
+Titanium | kg | 3.63e-04 | 2.08e-05
+High alloyed steel | kg | 7.22e-04 | 1.88e-04
+Copper | kg | 3.75e-05 | 1.38e-05
+Nafion | kg | 1.10e-05 | 1.13e-06
+Activated carbon | kg | 6.19e-06 | 2.53e-06
+Platinum | kg | 5.16e-08 | 5.63e-09
+Concrete | m3 | 8.02e-07 | 2.03e-07
+Low alloyed steel | kg | 1.65e-03 | 4.17e-04
+Aluminum | kg | 5.29e-05 | 3.91e-05
+Iridium | kg | 5.16e-07 | 2.31e-08
+
+[PAGE 12]
+The SMR-CCS study combines SMR production with CO2 sequestration, compression, transport and geological storage. The two modeled capture configurations are approximately 56% pre-combustion capture and 90% post-combustion capture. These are configurations of SMR-CCS, not separate hydrogen-production technologies.
+
+[PAGE 13]
+For methane pyrolysis, the LCI refers to hydrogen production in a liquid bubble column reactor using tin as molten medium. Four heat-supply configurations are modeled: hydrogen, natural gas, carbon and electricity. The by-product carbon is considered separately in the study's avoided-burden analysis; Table 3 is the harmonized foreground LCI used for the process configurations.
+
+For PEMEL, present-day production assumes 55 kWh/kg H2 and future production 45 kWh/kg H2. The LCI values for the two PEMEL configurations are in Table 4.
+
+[PAGE 14]
+3.2.6 BACKGROUND SYSTEM
+The study uses ecoinvent v3.6 cut-off for the background system. For domestic H2 production in Germany, regional dataset priority is Germany (DE), Europe (RER), Europe without Switzerland (EWS), global (GLO), then rest of world (RoW). For country-specific results, natural-gas and electricity datasets are adapted to the respective country grid mixes.
+
+[PAGE 15]
+REFERENCE CASE
+The reference case represents present-day conditions in Germany. Electricity is supplied from the German grid mix and natural gas from the corresponding grid/market supply chain.
+
+[PAGE 16]
+PUBLISHED REFERENCE-CASE GWI WITHOUT BY-PRODUCT CREDITS, kg CO2-eq per kg H2:
+SMR 11.57
+SMR-CCS (56%) 6.87
+SMR-CCS (90%) 3.97
+MP-H2 5.47
+MP-C 7.65
+MP-NG 6.45
+MP-E 9.91
+PEMEL today 34.85
+PEMEL future 28.50
