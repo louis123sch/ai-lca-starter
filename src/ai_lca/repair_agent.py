@@ -26,6 +26,14 @@ BANNED_ADDED_FRAGMENTS = (
     "gh_token",
 )
 
+# These are general extraction invariants already enforced by deterministic tests.
+# Automatic prompt repair may strengthen them, but must not silently remove them.
+REQUIRED_PROMPT_INVARIANTS = (
+    "explicit component lists",
+    "foreground input flow",
+    "do not reclassify such tabulated components as background subprocesses",
+)
+
 
 class RepairProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -53,6 +61,17 @@ def _validate_replacement(old: str, new: str) -> None:
         raise ValueError("Repair agent returned empty replacement content")
     if "STRUCTURE_SYSTEM_PROMPT" not in new or "FLOW_SYSTEM_PROMPT" not in new:
         raise ValueError("Repair would remove required extraction architecture")
+
+    lowered = new.casefold()
+    missing_invariants = [
+        invariant for invariant in REQUIRED_PROMPT_INVARIANTS if invariant not in lowered
+    ]
+    if missing_invariants:
+        raise ValueError(
+            "Repair would remove required prompt invariants: "
+            + " | ".join(missing_invariants)
+        )
+
     diff = difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="")
     added = [line[1:] for line in diff if line.startswith("+") and not line.startswith("+++")]
     suspicious = [
