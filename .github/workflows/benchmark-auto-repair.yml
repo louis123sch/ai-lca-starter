@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write
-  actions: read
+  actions: write
 
 concurrency:
   group: ai-lca-auto-repair
@@ -120,6 +120,7 @@ jobs:
 
       - name: Commit validated repair
         if: steps.repair.outputs.changed == 'true'
+        id: commit
         shell: bash
         run: |
           git config user.name "ai-lca-benchmark-bot"
@@ -127,6 +128,19 @@ jobs:
           git add src/ai_lca/llm.py
           git commit -m "auto-repair: improve unseen-paper extraction"
           git push origin HEAD:main
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger validation benchmarks immediately
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          # Pushes made with GITHUB_TOKEN do not themselves trigger push-based workflows.
+          # workflow_dispatch is explicitly allowed, so dispatch both the unseen benchmark
+          # and the regression benchmark against the just-pushed main branch.
+          gh workflow run gerloff-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
+          gh workflow run hermesmann-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
 
       - name: Record no-change diagnosis
         if: steps.artifact.outputs.available == 'true' && steps.repair.outputs.changed != 'true'
