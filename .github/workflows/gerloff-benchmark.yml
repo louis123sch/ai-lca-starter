@@ -9,6 +9,7 @@ on:
       - "benchmarks/gerloff_2021/**"
       - "pyproject.toml"
       - ".github/workflows/gerloff-benchmark.yml"
+      - "scripts/run_resilient_benchmark.sh"
   workflow_dispatch:
     inputs:
       runs:
@@ -46,13 +47,15 @@ jobs:
     name: Gerloff multimodal paper extraction
     needs: tests
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: gpt-5-mini
       OPENAI_VISION_MODEL: gpt-5-mini
+      AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+      AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
 
     steps:
       - name: Check out repository
@@ -86,16 +89,17 @@ jobs:
             RUNS=3
           fi
           echo "Running $RUNS independent multimodal extractions"
-          python -m ai_lca.benchmark_multimodal \
-            --expected benchmarks/gerloff_2021/expected.json \
-            --source \
-              benchmarks/gerloff_2021/source_main_excerpt.txt \
-              benchmarks/gerloff_2021/source_supplement_machine_readable.txt \
-              benchmarks/gerloff_2021/source_visual_inventory.docx \
-            --runs "$RUNS" \
-            --model "$OPENAI_MODEL" \
-            --max-visual-assets 8 \
-            --output-dir benchmark_runs/gerloff_2021
+          bash scripts/run_resilient_benchmark.sh \
+            python -m ai_lca.benchmark_multimodal \
+              --expected benchmarks/gerloff_2021/expected.json \
+              --source \
+                benchmarks/gerloff_2021/source_main_excerpt.txt \
+                benchmarks/gerloff_2021/source_supplement_machine_readable.txt \
+                benchmarks/gerloff_2021/source_visual_inventory.docx \
+              --runs "$RUNS" \
+              --model "$OPENAI_MODEL" \
+              --max-visual-assets 8 \
+              --output-dir benchmark_runs/gerloff_2021
 
       - name: Enforce unseen-paper quality gate
         shell: bash
