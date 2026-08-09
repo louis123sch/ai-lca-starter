@@ -1,0 +1,22 @@
+flow,activity,location
+Process water,Market group for tap water,RER
+Wastewater,"Market for wastewater, average",RER
+Deionized water,"Market for water, deionized",EWS
+Titanium,"Market for titanium, primary",GLO
+High alloyed steel,"Market for steel, chromium steel 18/8",GLO
+Copper,Market for copper,GLO
+Nafion,Market for tetrafluoroethylene,GLO
+Activated carbon,"Market for activated carbon, granular",GLO
+Platinum,Market for platinum,GLO
+Concrete,"Market for concrete, normal",RoW
+Low alloyed steel,"Market for steel, low-alloyed",GLO
+Aluminum,"Market for aluminium, cast alloy",GLO
+Natural gas,"Market for natural gas, high pressure",DE
+Cast iron,Market for cast iron,GLO
+Silica sand,Market for silica sand,GLO
+Palladium,Market for palladium,GLO
+Tin,Market for tin,GLO
+Silicon carbide,Market for silicon carbide,GLO
+Oxygen,"Market for oxygen, liquid",RER
+Carbon,Market for carbon black,GLO
+Electricity,"Market for electricity, high voltage",DE
