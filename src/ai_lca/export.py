@@ -23,6 +23,7 @@ def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
                 "direction": flow.direction,
                 "component_or_stage": flow.component_or_stage,
                 "basis": flow.basis,
+                "document": flow.evidence.document,
                 "page": flow.evidence.page,
                 "paragraph": flow.evidence.paragraph,
                 "table": flow.evidence.table,
