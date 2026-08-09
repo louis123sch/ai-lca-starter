@@ -38,6 +38,7 @@ A first-pass foreground process structure has already been identified. You MUST 
 Rules:
 1. Every flow must be attached to one of the supplied process IDs. Never create a new process ID or implicit subprocess.
 2. Extract only flows that the source indicates are part of the MODELED foreground LCI. Do not extract catalysts, solvents, materials, operating conditions, or technology options merely because they appear in review/process-description prose. Prefer explicit LCI tables and inventory-analysis sections.
+2a. When the source presents explicit component lists, BoP/stack tables, or "Table of components" for a modelled product system, treat each listed component as a foreground input flow to that assessed product system (or to the specified subcomponent if the locked structure includes a distinct subprocess for stack/BoP). Extract the component names and any provided amounts/units exactly as given; do not reclassify such tabulated components as background subprocesses.
 3. Never invent an amount, unit, material, process, functional unit, voltage level, market type, production route, document, page, table, or paragraph.
 4. If the paper says only 'electricity', extract 'electricity'. Do NOT turn it into 'medium-voltage electricity', 'market for electricity', or another ecoinvent-style dataset name unless the source states that detail.
 5. If a flow is mentioned but no amount is given, amount must be null.
