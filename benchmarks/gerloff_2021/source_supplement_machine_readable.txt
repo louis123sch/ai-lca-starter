@@ -99,6 +99,4 @@ Due to lack of data, the diaphragm compressor including frequency converter and 
 
 [PARAGRAPH 16]
 Container and foundation
-All electrolysis technologies are assumed to need a container including foundation. A 20 ft container weighs 2.25 t and a 40 ft container 3.74 t, made of low-alloyed steel. A 20 ft container foundation is around 5.6 t and a 40 ft foundation 11.4 t. For AEC the 40 ft container and foundation are scaled to 1 MW using a 0.7 scaling factor. A 20 ft container is used for PEMEC and assumed for SOEC.
-
-NOTE FOR BENCHMARK FIXTURE: The actual DOCX stores the detailed numerical component/eCoinvent inventories for Figures 1-5 as embedded images. The current application DOCX extractor reads paragraphs and native Word tables, but not text inside embedded images. Therefore their image-table contents are intentionally not reproduced in this machine-readable source fixture; the benchmark gold standard retains representative quantities from those figures to test this end-to-end ingestion limitation.
+All electrolysis technologies are assumed to need a container including foundation. A 20 ft container weighs 2.25 t and a 40 ft container 3.74 t, made of low-alloyed steel. A 20 ft container foundation is around 5.6 t and a 40 ft foundation 11.4 t. For AEC the 40 ft container and foundation are scaled to 1 MW using a scaling factor of 0.7. A 20 ft container is used for PEMEC and assumed for SOEC.
