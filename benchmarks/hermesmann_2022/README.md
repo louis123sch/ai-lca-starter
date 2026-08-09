@@ -2,7 +2,7 @@
 
 This benchmark is derived from the user-supplied main paper and supplementary information for *Green, Turquoise, Blue, or Grey? Environmentally friendly Hydrogen Production in Transforming Energy Systems*.
 
-The source documents themselves are intentionally not committed. The benchmark stores only factual LCI targets and evaluation rules.
+The full journal PDF and DOCX are not committed. Two private-repository text fixtures retain the LCA-relevant source content needed for automated regression testing, including deliberate technology-review distractors, the goal/scope, Tables 2–4, background mapping information, and published reference-case GWI values.
 
 ## Ground-truth scope
 
@@ -36,3 +36,22 @@ Supplementary Table S1 supplies expected ecoinvent v3.6 cut-off background proce
 ## Published-result targets
 
 The benchmark stores the reference-case GWI values without by-product credits reported in Table 7. These targets are kept separate from extraction scoring because a reconstructed Brightway model can differ from the paper due to ecoinvent and LCIA version differences even when the foreground inventory is correct.
+
+## Automated GitHub Actions loop
+
+`.github/workflows/hermesmann-benchmark.yml` runs deterministic tests and then repeated live LLM extractions. Pushes to `main` that change the extractor, tests, benchmark, workflow, or package configuration trigger the workflow automatically. A manual `workflow_dispatch` run defaults to five independent LLM runs; push-triggered runs default to three to limit API cost while still checking stochastic stability.
+
+The live job requires one encrypted repository secret:
+
+`OPENAI_API_KEY`
+
+Add it in GitHub under **Settings → Secrets and variables → Actions → New repository secret**. Do not commit the key to `.env`, source files, workflow YAML, issues, logs, or benchmark artifacts.
+
+The workflow uploads run-by-run extraction JSON, score reports, and `summary.json` as a 30-day artifact. The quality gate currently requires:
+
+- mean overall score >= 0.85;
+- minimum individual-run score >= 0.80;
+- mean process recall and precision >= 0.90;
+- mean flow recall and precision >= 0.85.
+
+The thresholds and gold-standard values should not be weakened simply to make CI pass. Failures should drive generalizable extractor improvements instead.
