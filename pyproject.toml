@@ -25,5 +25,6 @@ ai-lca-benchmark = "ai_lca.benchmark:main"
 test = ["pytest>=8.0"]
 
 # Benchmark source/gold packages 003-006 are staged; CI installs this project before event-driven progression.
+# Touch this shared CI surface only when a baseline revalidation is intentionally required.
 [tool.setuptools.packages.find]
 where = ["src"]
