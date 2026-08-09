@@ -109,7 +109,10 @@ ai-lca-starter/
 │   ├── geography.py          # conservative paper-context → ecoinvent location hints
 │   ├── llm.py                # two-pass structured extraction
 │   ├── brightway_search.py   # real Brightway candidate retrieval + soft geo ranking
+│   ├── benchmark.py          # repeated paper-grounded regression evaluation
 │   └── export.py
+├── benchmarks/
+│   └── hermesmann_2022/      # Benchmark 001 ground truth
 ├── notebooks/
 ├── tests/
 ├── data/
@@ -126,3 +129,41 @@ ai-lca-starter/
 - automatic approval of mappings.
 
 Those should come only after the paper-to-foreground extraction has been benchmarked against known inventories.
+
+## Regression benchmark: Hermesmann & Müller (2022)
+
+The repository now includes a paper-grounded benchmark under `benchmarks/hermesmann_2022/`.
+It treats the paper's explicitly modeled LCI in Tables 2–4 as the core foreground ground truth: nine hydrogen-production configurations and 119 quantified foreground flows. The supplementary information supplies expected ecoinvent background mappings, while remaining separate from foreground flow naming.
+
+The benchmark is designed to catch the failure modes that matter for paper-to-Brightway reconstruction:
+
+- missing modeled processes or flows;
+- invented/over-decomposed foreground subprocesses;
+- materials mentioned only in review prose being mistaken for modeled LCI flows;
+- background ecoinvent names such as `market for ...` leaking into foreground flow names;
+- wrong amount, unit, direction, functional unit, system boundary, or reference geography.
+
+The application can now ingest the paper and supplementary documents together. Each source is wrapped in a `[DOCUMENT: filename]` marker so evidence provenance remains unambiguous even when page numbers restart in different files.
+
+### Run a repeated live benchmark
+
+With `OPENAI_API_KEY` configured, run:
+
+```bash
+ai-lca-benchmark live \
+  --expected benchmarks/hermesmann_2022/expected.json \
+  --source "path/to/main-paper.pdf" "path/to/supplement.docx" \
+  --runs 5
+```
+
+Each run saves the structured extraction and a scored report under `benchmark_runs/hermesmann_2022/`, plus an aggregate summary. Repeating the same source several times is intentional: it measures extraction stability as well as one-off accuracy.
+
+To score an extraction JSON that already exists:
+
+```bash
+ai-lca-benchmark evaluate \
+  --expected benchmarks/hermesmann_2022/expected.json \
+  --extraction benchmark_runs/hermesmann_2022/extraction_run_01.json
+```
+
+The benchmark source documents themselves are not committed to the repository; only the derived factual ground truth and evaluation rules are stored.
