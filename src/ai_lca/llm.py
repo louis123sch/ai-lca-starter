@@ -29,6 +29,7 @@ Rules:
 12. Include short evidence snippets for every process and for study context where possible. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
 13. Record ambiguity and possible double counting in assumptions_or_warnings.
 14. This is a proposal for human review, not an approved LCA model.
+15. Naming and identifiers: emit concise, machine-friendly process identifiers and short display names. If the study uses acronyms or short labels (e.g. technology acronyms), derive a short lowercase id from them (for example, when the paper repeatedly uses an acronym like "AEC", use "aec" as the id). Avoid embedding capacity, basis text, or parenthetical qualifiers (for example "1 MW" or "per 1 kg H2") inside the primary process name; record such metadata (capacity, basis) in the functional_unit or study_context fields. Use these short ids consistently and include them in every evidence snippet so downstream extraction and matching can rely on stable keys.
 """
 
 
@@ -36,7 +37,7 @@ FLOW_SYSTEM_PROMPT = """You are extracting foreground LCI flows from a supplied 
 A first-pass foreground process structure has already been identified. You MUST fill that structure; you may not redesign it.
 
 Rules:
-1. Every flow must be attached to one of the supplied process IDs. Never create a new process ID or implicit subprocess.
+1. Every flow must be attached to one of the supplied process IDs. Never create a new process ID or implicit subprocess. Use the process ids exactly as provided in the LOCKED PROCESS STRUCTURE (they are expected to be short, stable ids derived from the study's own labels).
 2. Extract only flows that the source indicates are part of the MODELED foreground LCI. Do not extract catalysts, solvents, materials, operating conditions, or technology options merely because they appear in review/process-description prose. Prefer explicit LCI tables and inventory-analysis sections.
 2a. When the source presents explicit component lists, BoP/stack tables, or "Table of components" for a modelled product system, treat each listed component as a foreground input flow to that assessed product system (or to the specified subcomponent if the locked structure includes a distinct subprocess for stack/BoP). Extract the component names and any provided amounts/units exactly as given; do not reclassify such tabulated components as background subprocesses.
 3. Never invent an amount, unit, material, process, functional unit, voltage level, market type, production route, document, page, table, or paragraph.
