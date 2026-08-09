@@ -4,6 +4,14 @@ on:
   workflow_run:
     workflows: ["Gerloff unseen validation benchmark"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      failed_run_id:
+        description: "Gerloff workflow run ID to diagnose"
+        required: true
+      failed_head_sha:
+        description: "Commit SHA evaluated by the failed Gerloff run"
+        required: true
 
 permissions:
   contents: write
@@ -15,9 +23,11 @@ concurrency:
 
 jobs:
   repair:
-    if: github.event.workflow_run.conclusion == 'failure'
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 70
 
     steps:
       - name: Check out main
@@ -28,11 +38,12 @@ jobs:
 
       - name: Skip stale benchmark failures
         id: freshness
+        env:
+          FAILED_HEAD: ${{ github.event.workflow_run.head_sha || inputs.failed_head_sha }}
         shell: bash
         run: |
           git fetch origin main
           CURRENT="$(git rev-parse origin/main)"
-          FAILED_HEAD="${{ github.event.workflow_run.head_sha }}"
           if [ "$CURRENT" != "$FAILED_HEAD" ]; then
             echo "Current main ($CURRENT) is newer than failed benchmark head ($FAILED_HEAD); skipping stale repair."
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -66,7 +77,7 @@ jobs:
         id: artifact
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.failed_run_id }}
         shell: bash
         run: |
           mkdir -p repair_input
@@ -136,11 +147,59 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          # Pushes made with GITHUB_TOKEN do not themselves trigger push-based workflows.
-          # workflow_dispatch is explicitly allowed, so dispatch both the unseen benchmark
-          # and the regression benchmark against the just-pushed main branch.
+          # GITHUB_TOKEN pushes do not trigger push workflows, so explicitly dispatch both validations.
           gh workflow run gerloff-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
           gh workflow run hermesmann-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
+
+      - name: Wait for validations and continue safely
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          latest_for_head() {
+            local workflow="$1"
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" --branch main --limit 30 \
+              --json databaseId,headSha,status,conclusion,createdAt \
+              | jq -c --arg SHA "$HEAD_SHA" '[.[] | select(.headSha == $SHA)] | sort_by(.createdAt) | last // {}'
+          }
+
+          GERLOFF='{}'
+          HERMESMANN='{}'
+          for _ in $(seq 1 180); do
+            GERLOFF="$(latest_for_head gerloff-benchmark.yml)"
+            HERMESMANN="$(latest_for_head hermesmann-benchmark.yml)"
+            GS="$(jq -r '.status // ""' <<<"$GERLOFF")"
+            HS="$(jq -r '.status // ""' <<<"$HERMESMANN")"
+            if [ "$GS" = "completed" ] && [ "$HS" = "completed" ]; then
+              break
+            fi
+            sleep 15
+          done
+
+          GID="$(jq -r '.databaseId // empty' <<<"$GERLOFF")"
+          HID="$(jq -r '.databaseId // empty' <<<"$HERMESMANN")"
+          GC="$(jq -r '.conclusion // empty' <<<"$GERLOFF")"
+          HC="$(jq -r '.conclusion // empty' <<<"$HERMESMANN")"
+          echo "Gerloff run $GID: $GC"
+          echo "Hermesmann run $HID: $HC"
+
+          if [ "$GC" = "success" ] && [ "$HC" = "success" ]; then
+            if ! gh run list --repo "$GITHUB_REPOSITORY" --workflow benchmark-003.yml --branch main --limit 30 \
+              --json headSha | jq -e --arg SHA "$HEAD_SHA" 'any(.[]; .headSha == $SHA)' >/dev/null; then
+              echo "Baseline pair passed; dispatching Benchmark 003."
+              gh workflow run benchmark-003.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
+            fi
+          elif [ "$GC" = "failure" ] && [ "$HC" = "success" ] && [ -n "$GID" ]; then
+            echo "Gerloff still fails while Hermesmann is stable; dispatching the next bounded repair iteration."
+            gh workflow run benchmark-auto-repair.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f failed_run_id="$GID" -f failed_head_sha="$HEAD_SHA"
+          else
+            echo "Validation pair did not reach a safe auto-continue state; stopping for supervisory review."
+          fi
 
       - name: Record no-change diagnosis
         if: steps.artifact.outputs.available == 'true' && steps.repair.outputs.changed != 'true'
