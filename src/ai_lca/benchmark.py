@@ -169,8 +169,10 @@ def evaluate_extraction(extraction: InventoryExtraction, expected: dict[str, Any
     unexpected_flows = [f"{f.process_id}: {f.name}" for i, f in enumerate(extraction.flows) if i not in matched_actual]
     forbidden_terms = [_norm(x) for x in expected.get("forbidden_process_terms", [])]
     forbidden_processes = []
-    for process in extraction.processes:
-        if any(term in _norm(process.name) for term in forbidden_terms if term):
+    matched_process_indices = set(proc_matches.values())
+    for process_index, process in enumerate(extraction.processes):
+        is_expected_match = process_index in matched_process_indices
+        if not is_expected_match and any(term in _norm(process.name) for term in forbidden_terms if term):
             forbidden_processes.append(process.name)
         if process.parent_process_id:
             forbidden_processes.append(f"{process.name} (unexpected child process)")
