@@ -38,3 +38,26 @@ def test_document_dispatch_accepts_docx():
     buffer = io.BytesIO()
     document.save(buffer)
     assert "Hydrogen production" in extract_document_text(buffer.getvalue(), "paper.docx")
+
+
+def test_combined_documents_keep_document_markers():
+    from ai_lca.documents import combine_document_texts
+
+    document = Document()
+    document.add_paragraph("Supplementary inventory")
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Main paper inventory")
+    pdf_bytes = pdf.tobytes()
+
+    text = combine_document_texts([
+        ("paper.pdf", pdf_bytes),
+        ("supplement.docx", buffer.getvalue()),
+    ])
+    assert "[DOCUMENT: paper.pdf]" in text
+    assert "[DOCUMENT: supplement.docx]" in text
+    assert "Main paper inventory" in text
+    assert "Supplementary inventory" in text
