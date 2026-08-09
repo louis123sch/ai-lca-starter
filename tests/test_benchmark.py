@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from ai_lca.benchmark import evaluate_extraction, load_expected
+from ai_lca.llm import FLOW_SYSTEM_PROMPT
 from ai_lca.models import (
     ForegroundProcess,
     InventoryExtraction,
@@ -100,6 +101,13 @@ def test_benchmark_catches_overdecomposition_and_dataset_name_leakage():
     assert "market for electricity, high voltage" in report.forbidden_foreground_names
     assert report.process_precision < 1.0
     assert report.flow_precision < 1.0
+
+
+def test_flow_prompt_keeps_explicit_component_tables_as_inventory_flows():
+    prompt = FLOW_SYSTEM_PROMPT.casefold()
+    assert "explicit component lists" in prompt
+    assert "foreground input flow" in prompt
+    assert "do not reclassify such tabulated components as background subprocesses" in prompt
 
 
 def test_published_result_comparison_is_zero_for_paper_values():
