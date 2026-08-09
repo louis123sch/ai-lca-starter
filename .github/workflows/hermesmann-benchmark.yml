@@ -46,7 +46,7 @@ jobs:
     name: Live paper extraction benchmark
     needs: tests
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
@@ -79,7 +79,7 @@ jobs:
         run: |
           RUNS="${{ github.event.inputs.runs }}"
           if [ -z "$RUNS" ]; then
-            RUNS=3
+            RUNS=10
           fi
           echo "Running $RUNS independent benchmark extractions"
           python -m ai_lca.benchmark live \
