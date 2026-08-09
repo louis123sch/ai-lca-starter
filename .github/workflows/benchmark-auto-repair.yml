@@ -141,6 +141,26 @@ jobs:
           git push origin HEAD:main
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for repaired commit to become repository main
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          for _ in $(seq 1 40); do
+            REMOTE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+            if [ "$REMOTE_SHA" = "$HEAD_SHA" ]; then
+              echo "Repository main now resolves to repaired commit $HEAD_SHA."
+              exit 0
+            fi
+            echo "Waiting for repository main to resolve to repaired commit; currently $REMOTE_SHA"
+            sleep 3
+          done
+          echo "::error::Repository main did not resolve to repaired commit $HEAD_SHA before validation dispatch."
+          exit 1
+
       - name: Trigger validation benchmarks immediately
         if: steps.commit.outputs.pushed == 'true'
         env:
@@ -148,6 +168,7 @@ jobs:
         shell: bash
         run: |
           # GITHUB_TOKEN pushes do not trigger push workflows, so explicitly dispatch both validations.
+          # The preceding step prevents a ref-resolution race where --ref main could still target the parent commit.
           gh workflow run gerloff-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
           gh workflow run hermesmann-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
 
