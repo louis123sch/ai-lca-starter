@@ -1,0 +1,147 @@
+name: Hermesmann regression benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "benchmarks/hermesmann_2022/**"
+      - "pyproject.toml"
+      - ".github/workflows/hermesmann-benchmark.yml"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Number of independent LLM extraction runs"
+        required: false
+        default: "5"
+
+concurrency:
+  group: hermesmann-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Deterministic tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: python -m pip install -e ".[test]"
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  benchmark:
+    name: Live paper extraction benchmark
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5-mini
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: python -m pip install -e ".[test]"
+
+      - name: Verify OpenAI secret exists
+        shell: bash
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Repository secret OPENAI_API_KEY is missing. Add it under Settings > Secrets and variables > Actions > New repository secret."
+            exit 2
+          fi
+
+      - name: Run repeated Hermesmann extraction benchmark
+        shell: bash
+        run: |
+          RUNS="${{ github.event.inputs.runs }}"
+          if [ -z "$RUNS" ]; then
+            RUNS=3
+          fi
+          echo "Running $RUNS independent benchmark extractions"
+          python -m ai_lca.benchmark live \
+            --expected benchmarks/hermesmann_2022/expected.json \
+            --source \
+              benchmarks/hermesmann_2022/source_main_excerpt.txt \
+              benchmarks/hermesmann_2022/source_supplement_excerpt.txt \
+            --runs "$RUNS" \
+            --model "$OPENAI_MODEL" \
+            --output-dir benchmark_runs/hermesmann_2022
+
+      - name: Enforce benchmark quality gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("benchmark_runs/hermesmann_2022/summary.json")
+          summary = json.loads(path.read_text())
+          mean_score = float(summary["mean_overall_score"])
+          min_score = float(summary["min_overall_score"])
+          process_recall = float(summary["mean_process_recall"])
+          process_precision = float(summary["mean_process_precision"])
+          flow_recall = float(summary["mean_flow_recall"])
+          flow_precision = float(summary["mean_flow_precision"])
+
+          print(f"Mean overall score:     {mean_score:.3f}")
+          print(f"Minimum run score:      {min_score:.3f}")
+          print(f"Mean process recall:    {process_recall:.3f}")
+          print(f"Mean process precision: {process_precision:.3f}")
+          print(f"Mean flow recall:       {flow_recall:.3f}")
+          print(f"Mean flow precision:    {flow_precision:.3f}")
+
+          failures = []
+          if mean_score < 0.85:
+              failures.append(f"mean overall score {mean_score:.3f} < 0.850")
+          if min_score < 0.80:
+              failures.append(f"minimum run score {min_score:.3f} < 0.800")
+          if process_recall < 0.90:
+              failures.append(f"process recall {process_recall:.3f} < 0.900")
+          if process_precision < 0.90:
+              failures.append(f"process precision {process_precision:.3f} < 0.900")
+          if flow_recall < 0.85:
+              failures.append(f"flow recall {flow_recall:.3f} < 0.850")
+          if flow_precision < 0.85:
+              failures.append(f"flow precision {flow_precision:.3f} < 0.850")
+
+          if failures:
+              print("Benchmark gate failed:")
+              for failure in failures:
+                  print(f" - {failure}")
+              raise SystemExit(1)
+
+          print("Benchmark gate passed.")
+          PY
+
+      - name: Upload benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermesmann-benchmark-${{ github.run_id }}
+          path: benchmark_runs/hermesmann_2022
+          if-no-files-found: warn
+          retention-days: 30
