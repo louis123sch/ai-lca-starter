@@ -43,15 +43,16 @@ jobs:
         run: python -m pytest -q
 
   benchmark:
-    name: Blind Gerloff paper extraction
+    name: Gerloff multimodal paper extraction
     needs: tests
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: gpt-5-mini
+      OPENAI_VISION_MODEL: gpt-5-mini
 
     steps:
       - name: Check out repository
@@ -74,21 +75,26 @@ jobs:
             exit 2
           fi
 
-      - name: Run blind Gerloff extraction benchmark
+      - name: Build normalized image-only source fixture
+        run: python benchmarks/gerloff_2021/build_visual_fixture.py
+
+      - name: Run Gerloff multimodal extraction benchmark
         shell: bash
         run: |
           RUNS="${{ github.event.inputs.runs }}"
           if [ -z "$RUNS" ]; then
             RUNS=3
           fi
-          echo "Running $RUNS independent unseen-paper extractions"
-          python -m ai_lca.benchmark live \
+          echo "Running $RUNS independent multimodal extractions"
+          python -m ai_lca.benchmark_multimodal \
             --expected benchmarks/gerloff_2021/expected.json \
             --source \
               benchmarks/gerloff_2021/source_main_excerpt.txt \
               benchmarks/gerloff_2021/source_supplement_machine_readable.txt \
+              benchmarks/gerloff_2021/source_visual_inventory.docx \
             --runs "$RUNS" \
             --model "$OPENAI_MODEL" \
+            --max-visual-assets 8 \
             --output-dir benchmark_runs/gerloff_2021
 
       - name: Enforce unseen-paper quality gate
