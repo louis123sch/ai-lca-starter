@@ -1,0 +1,52 @@
+{
+  "benchmark_id":"terlouw_2021",
+  "scope":"Configuration-level DACCS benchmark for five explicitly assessed energy-system layouts. Shared foreground DAC and CO2 storage/transport activities must remain source-facing foreground evidence and must not be silently renamed to ecoinvent datasets.",
+  "context":{"functional_unit_terms":["1 ton","CO2"]},
+  "processes":[
+    {"key":"fresnel_pv","name":"Autonomous Fresnel + PV","aliases":["Autonomous (Fresnel + PV)","Autonomous Fresnel + PV"]},
+    {"key":"hthp_pv","name":"Autonomous HTHP + PV","aliases":["Autonomous (HTHP + PV)","Autonomous HTHP + PV"]},
+    {"key":"hthp_grid","name":"HTHP + Grid","aliases":["HTHP + Grid"]},
+    {"key":"waste_grid","name":"Waste Heat + Grid","aliases":["Waste Heat + Grid","Waste heat + Grid"]},
+    {"key":"waste_pv_battery","name":"Waste Heat + PV + Battery","aliases":["Waste Heat + PV + Battery","Waste heat + PV + Battery"]}
+  ],
+  "forbidden_foreground_name_terms":["market for","market group for","electricity production"],
+  "flows":[
+    {"process_key":"fresnel_pv","name":"Electricity consumption","aliases":["electricity consumption","electricity"],"amount":690,"unit":"kWh","direction":"input"},
+    {"process_key":"fresnel_pv","name":"Fresnel heat consumption","aliases":["Fresnel heat consumption","Fresnel heat","heat consumption"],"amount":1500,"unit":"kWh","direction":"input"},
+    {"process_key":"fresnel_pv","name":"Sorbent consumption","aliases":["sorbent consumption","sorbent"],"amount":3.0,"unit":"kg","direction":"input"},
+    {"process_key":"fresnel_pv","name":"Battery pack capacity","aliases":["battery pack capacity","battery storage"],"amount":125,"unit":"MWh","direction":"input"},
+    {"process_key":"fresnel_pv","name":"Heat storage","aliases":["heat storage","heat storage capacity"],"amount":210,"unit":"MWh","direction":"input"},
+    {"process_key":"fresnel_pv","name":"DAC plant","aliases":["DAC plant","DAC unit"],"amount":null,"unit":null,"direction":"input"},
+    {"process_key":"fresnel_pv","name":"CO2 storage and transport","aliases":["CO2 storage and transport","storage and transport of CO2","CO2 transport and storage"],"amount":null,"unit":null,"direction":"input"},
+
+    {"process_key":"hthp_pv","name":"Electricity consumption","aliases":["electricity consumption","electricity"],"amount":1271,"unit":"kWh","direction":"input"},
+    {"process_key":"hthp_pv","name":"Sorbent consumption","aliases":["sorbent consumption","sorbent"],"amount":3.0,"unit":"kg","direction":"input"},
+    {"process_key":"hthp_pv","name":"Battery pack capacity","aliases":["battery pack capacity","battery storage"],"amount":221,"unit":"MWh","direction":"input"},
+    {"process_key":"hthp_pv","name":"HTHP","aliases":["HTHP","high-temperature heat pump"],"amount":17,"unit":"MW","direction":"input"},
+    {"process_key":"hthp_pv","name":"DAC plant","aliases":["DAC plant","DAC unit"],"amount":null,"unit":null,"direction":"input"},
+    {"process_key":"hthp_pv","name":"CO2 storage and transport","aliases":["CO2 storage and transport","storage and transport of CO2","CO2 transport and storage"],"amount":null,"unit":null,"direction":"input"},
+
+    {"process_key":"hthp_grid","name":"Electricity consumption","aliases":["electricity consumption","electricity"],"amount":1132,"unit":"kWh","direction":"input"},
+    {"process_key":"hthp_grid","name":"Sorbent consumption","aliases":["sorbent consumption","sorbent"],"amount":3.0,"unit":"kg","direction":"input"},
+    {"process_key":"hthp_grid","name":"HTHP","aliases":["HTHP","high-temperature heat pump"],"amount":17,"unit":"MW","direction":"input"},
+    {"process_key":"hthp_grid","name":"DAC plant","aliases":["DAC plant","DAC unit"],"amount":null,"unit":null,"direction":"input"},
+    {"process_key":"hthp_grid","name":"CO2 storage and transport","aliases":["CO2 storage and transport","storage and transport of CO2","CO2 transport and storage"],"amount":null,"unit":null,"direction":"input"},
+
+    {"process_key":"waste_grid","name":"Electricity consumption","aliases":["electricity consumption","electricity"],"amount":614,"unit":"kWh","direction":"input"},
+    {"process_key":"waste_grid","name":"Waste heat consumption","aliases":["waste heat consumption","waste heat","heat consumption"],"amount":1500,"unit":"kWh","direction":"input"},
+    {"process_key":"waste_grid","name":"Sorbent consumption","aliases":["sorbent consumption","sorbent"],"amount":3.0,"unit":"kg","direction":"input"},
+    {"process_key":"waste_grid","name":"DAC plant","aliases":["DAC plant","DAC unit"],"amount":null,"unit":null,"direction":"input"},
+    {"process_key":"waste_grid","name":"CO2 storage and transport","aliases":["CO2 storage and transport","storage and transport of CO2","CO2 transport and storage"],"amount":null,"unit":null,"direction":"input"},
+
+    {"process_key":"waste_pv_battery","name":"Electricity consumption","aliases":["electricity consumption","electricity"],"amount":690,"unit":"kWh","direction":"input"},
+    {"process_key":"waste_pv_battery","name":"Waste heat consumption","aliases":["waste heat consumption","waste heat","heat consumption"],"amount":1500,"unit":"kWh","direction":"input"},
+    {"process_key":"waste_pv_battery","name":"Sorbent consumption","aliases":["sorbent consumption","sorbent"],"amount":3.0,"unit":"kg","direction":"input"},
+    {"process_key":"waste_pv_battery","name":"Battery pack capacity","aliases":["battery pack capacity","battery storage"],"amount":120,"unit":"MWh","direction":"input"},
+    {"process_key":"waste_pv_battery","name":"DAC plant","aliases":["DAC plant","DAC unit"],"amount":null,"unit":null,"direction":"input"},
+    {"process_key":"waste_pv_battery","name":"CO2 storage and transport","aliases":["CO2 storage and transport","storage and transport of CO2","CO2 transport and storage"],"amount":null,"unit":null,"direction":"input"}
+  ],
+  "benchmark_design_notes":[
+    "Terlouw explicitly describes DAC, CO2 storage/transport and layout-dependent energy/storage systems as foreground processes. This initial configuration-level benchmark scores their source-supported presence as foreground exchanges while the evaluator hierarchy representation is generalized separately; it does not convert them to background dataset names.",
+    "No single reference geography is imposed because the main analysis is deliberately multi-country."
+  ]
+}
