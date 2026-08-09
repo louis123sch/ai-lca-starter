@@ -15,11 +15,12 @@ def test_repair_validator_rejects_removing_prompt_invariant():
     invariant = REQUIRED_PROMPT_INVARIANTS[-1]
     assert invariant in current.casefold()
 
-    # Remove the actual lower-case invariant text present in FLOW_SYSTEM_PROMPT.
+    # Remove every occurrence of the protected invariant. A valid repair may
+    # repeat protected wording for emphasis, so the regression test must check
+    # the validator's semantic invariant rather than assume a single occurrence.
     modified = current.replace(
         "do not reclassify such tabulated components as background subprocesses",
         "keep tabulated components attached to the assessed foreground system",
-        1,
     )
     assert modified != current
     assert invariant not in modified.casefold()
