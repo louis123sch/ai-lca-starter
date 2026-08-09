@@ -15,12 +15,14 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     permissions:
       contents: read
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: gpt-5-mini
+      AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+      AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,11 +38,12 @@ jobs:
         shell: bash
         run: |
           RUNS="${{ github.event.inputs.runs }}"; [ -n "$RUNS" ] || RUNS=3
-          python -m ai_lca.benchmark live \
-            --expected benchmarks/terlouw_2021/expected.json \
-            --source benchmarks/terlouw_2021/source_excerpt.txt \
-            --runs "$RUNS" --model "$OPENAI_MODEL" \
-            --output-dir benchmark_runs/terlouw_2021
+          bash scripts/run_resilient_benchmark.sh \
+            python -m ai_lca.benchmark live \
+              --expected benchmarks/terlouw_2021/expected.json \
+              --source benchmarks/terlouw_2021/source_excerpt.txt \
+              --runs "$RUNS" --model "$OPENAI_MODEL" \
+              --output-dir benchmark_runs/terlouw_2021
       - name: Enforce standard quality gate
         run: |
           python - <<'PY'
