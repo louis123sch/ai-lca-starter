@@ -174,9 +174,16 @@ def transcribe_visual_evidence(
             if item is None:
                 warnings.append(f"No visual transcription returned for {asset.document}/{asset.asset_id}.")
                 continue
+            # surface any warnings from the visual stage
             warnings.extend(f"{asset.document}/{asset.asset_id}: {w}" for w in item.warnings)
-            if not item.relevant_to_lca or not item.evidence_text.strip():
+            # NOTE: include any non-empty transcriptions even if the vision model flagged them as not relevant.
+            # Previously we skipped items marked not relevant; that could drop legitimate tabulated component lists
+            # when the vision model mis-labelled relevance. To be conservative and recover explicit component
+            # inventories, include any non-empty evidence_text and log a warning when relevance is False.
+            if not item.evidence_text.strip():
                 continue
+            if not item.relevant_to_lca:
+                warnings.append(f"{asset.document}/{asset.asset_id}: visual evidence marked not relevant but included for LCA extraction")
             blocks.append(
                 f"[VISUAL EVIDENCE: {asset.document} | {asset.asset_id} | {item.evidence_type}]\n"
                 f"Nearby context: {asset.context or 'None'}\n"
