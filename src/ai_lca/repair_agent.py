@@ -92,6 +92,7 @@ def propose_repair(
     current = TARGET.read_text()
     reports = _load_reports(benchmark_root)
     source = "\n\n".join(f"SOURCE {p}:\n{p.read_text()}" for p in source_paths if p.exists())
+    protected = "\n".join(f"- {item}" for item in REQUIRED_PROMPT_INVARIANTS)
     prompt = f"""A paper-grounded AI-LCA extraction benchmark failed.
 
 You may make at most ONE narrow, generalisable change to src/ai_lca/llm.py. Do not hard-code this paper, process names, quantities, benchmark thresholds, expected values, or aliases. Do not modify the gold standard. Preserve the architecture: source evidence -> process structure -> locked flow extraction -> human review -> Brightway matching. Preserve anti-hallucination, foreground/background separation, and anti-over-decomposition constraints.
@@ -99,6 +100,9 @@ You may make at most ONE narrow, generalisable change to src/ai_lca/llm.py. Do n
 Prefer a prompt/reasoning improvement that would make sense for unseen LCA papers. If the failure is fundamentally document ingestion rather than LCA reasoning, set should_change=false; ingestion code must be fixed by a human-reviewed code change instead of pretending a prompt can see missing source evidence.
 
 Do not add network libraries, shell/system execution, secret handling, filesystem writes, or external URLs. Preserve existing public functions and imports unless a small harmless import is essential.
+
+The following general prompt invariants are protected and must remain present verbatim in any replacement content:
+{protected}
 
 BENCHMARK REPORTS:
 {reports}
