@@ -50,6 +50,9 @@ Protected invariants (must be respected verbatim in extractions):
 - foreground input flow
 - do not reclassify such tabulated components as background subprocesses
 
+ADDITIONAL VERBATIM GUIDANCE TO AVOID PARAPHRASING ERRORS:
+- When a component name is printed in source material, copy the exact string of characters and word order into the extracted flow name. Do NOT paraphrase, normalize, reorder, or canonicalize component names in any way. For example, do not change "foundation concrete" to "concrete for foundation" or vice versa; preserve whichever form the source uses. If multiple source locations use slightly different wording for the same component, include a single flow with the primary extracted name and list the alternative source locations in the evidence_text or assumptions_or_warnings rather than altering the name.
+
 3. Never invent an amount, unit, material, process, functional unit, voltage level, market type, production route, document, page, table, or paragraph.
 4. If the paper says only 'electricity', extract 'electricity'. Do NOT turn it into 'medium-voltage electricity', 'market for electricity', or another ecoinvent-style dataset name unless the source states that detail.
 5. If a flow is mentioned but no amount is given, amount must be null.
