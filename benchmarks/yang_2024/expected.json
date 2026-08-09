@@ -1,0 +1,36 @@
+{
+  "benchmark_id": "yang_2024",
+  "scope": "Cradle-to-gate comparison of DACH and AEL. DACH oxide-removal and hydrolysis inventories and AEL manufacturing/operation inventories remain attached to the two assessed product systems rather than being over-decomposed into equipment subprocesses.",
+  "context": {
+    "functional_unit_terms": ["1 kg", "hydrogen"],
+    "system_boundary": "cradle to gate"
+  },
+  "processes": [
+    {"key": "dach", "name": "DSSW alkaline catalysed hydrolysis", "aliases": ["DACH", "DSSW alkaline catalyzed hydrolysis", "DSSW alkaline catalysed hydrolysis"]},
+    {"key": "ael", "name": "Alkaline water electrolysis", "aliases": ["AEL", "alkaline water electrolysis", "alkaline electrolysis"]}
+  ],
+  "forbidden_process_terms": ["oxide removal", "hydrolysis stage", "manufacturing stage", "operation stage", "hydrogen electrode", "oxygen electrode", "membrane", "frame", "gasket", "balance of plant", "BOP", "storage tank", "pump", "inverter", "PEM", "SOEC"],
+  "flows": [
+    {"process_key":"dach","name":"DSSW","aliases":["DSSW"],"amount":5.71,"unit":"kg","direction":"input"},
+    {"process_key":"dach","name":"Hydrofluoric acid","aliases":["hydrofluoric acid","HF acid"],"amount":0.14,"unit":"kg","direction":"input"},
+    {"process_key":"dach","name":"Ethanol","aliases":["ethanol"],"amount":18.02,"unit":"kg","direction":"input"},
+    {"process_key":"dach","name":"Deionized water","aliases":["deionized water"],"amount":67.25,"unit":"kg","direction":"input"},
+    {"process_key":"dach","name":"DSSW (oxide removal)","aliases":["DSSW oxide removal","DSSW (oxide removal)"],"amount":5.54,"unit":"kg","direction":"output"},
+    {"process_key":"dach","name":"DSSW (oxide removal)","aliases":["DSSW oxide removal","DSSW (oxide removal)"],"amount":5.54,"unit":"kg","direction":"input"},
+    {"process_key":"dach","name":"Solid potassium hydroxide","aliases":["solid potassium hydroxide","potassium hydroxide","KOH"],"amount":22.15,"unit":"kg","direction":"input"},
+    {"process_key":"dach","name":"Deionized water","aliases":["deionized water"],"amount":3.56,"unit":"kg","direction":"input"},
+    {"process_key":"dach","name":"Hydrogen","aliases":["hydrogen","H2"],"amount":1.0,"unit":"kg","direction":"output"},
+    {"process_key":"ael","name":"Low-alloyed steel","aliases":["low-alloyed steel","low alloyed steel"],"amount":0.00662,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Nickel","aliases":["nickel"],"amount":0.000103,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Chromium","aliases":["chromium"],"amount":0.000103,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Aluminum","aliases":["aluminum","aluminium"],"amount":0.0000323,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Zirconium oxide","aliases":["zirconium oxide"],"amount":0.0000562,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Polysulfone","aliases":["polysulfone"],"amount":0.0000133,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Polyphenylene sulfide","aliases":["polyphenylene sulfide"],"amount":0.0000174,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Polyethylene","aliases":["polyethylene"],"amount":0.0000256,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Synthetic rubber","aliases":["synthetic rubber"],"amount":0.00000381,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Electricity","aliases":["electricity"],"amount":49.0,"unit":"kWh","direction":"input"},
+    {"process_key":"ael","name":"Deionized water","aliases":["deionized water"],"amount":11.2,"unit":"kg","direction":"input"},
+    {"process_key":"ael","name":"Potassium hydroxide","aliases":["potassium hydroxide","KOH"],"amount":0.00085,"unit":"kg","direction":"input"}
+  ]
+}
