@@ -7,7 +7,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from ai_lca.brightway_search import list_databases, search_candidates
-from ai_lca.documents import extract_document_text
+from ai_lca.documents import combine_document_texts
 from ai_lca.export import dataframe_to_json, extraction_to_dataframe, process_structure_to_dataframe
 from ai_lca.geography import ecoinvent_location_hints
 from ai_lca.llm import extract_inventory_from_text
@@ -46,23 +46,24 @@ with paste_tab:
     )
 
 with document_tab:
-    uploaded_document = st.file_uploader(
-        "Upload a text-readable PDF or Word document",
+    uploaded_documents = st.file_uploader(
+        "Upload the paper and any supplementary PDF/Word documents",
         type=["pdf", "docx"],
+        accept_multiple_files=True,
     )
     document_preview = ""
-    if uploaded_document is not None:
+    if uploaded_documents:
         try:
-            document_preview = extract_document_text(
-                uploaded_document.getvalue(),
-                uploaded_document.name,
+            document_preview = combine_document_texts(
+                [(doc.name, doc.getvalue()) for doc in uploaded_documents]
             )
+            names = ", ".join(doc.name for doc in uploaded_documents)
             st.success(
-                f"Extracted machine-readable text from {uploaded_document.name} "
-                f"({len(document_preview):,} characters)."
+                f"Combined {len(uploaded_documents)} source document(s) "
+                f"({len(document_preview):,} characters): {names}"
             )
-            with st.expander("Preview extracted text"):
-                st.text(document_preview[:12000])
+            with st.expander("Preview combined source text"):
+                st.text(document_preview[:16000])
         except Exception as exc:
             st.error(str(exc))
 
@@ -102,6 +103,8 @@ if "extraction" in st.session_state:
             f"Geography basis: {context.geography_basis}. "
             f"{context.geography_rationale or ''}".strip()
         )
+    if context.additional_geographies:
+        st.write(f"**Additional geographic scenarios:** {', '.join(context.additional_geographies)}")
     if context.system_boundary:
         st.write(f"**System boundary:** {context.system_boundary}")
     if context.temporal_context:
