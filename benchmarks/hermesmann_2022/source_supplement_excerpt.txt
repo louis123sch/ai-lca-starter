@@ -1,0 +1,42 @@
+[DOCUMENT CONTEXT]
+Supplementary Information for Hermesmann and Müller, Green, Turquoise, Blue, or Grey? Environmentally-friendly Hydrogen Production in Transforming Energy Systems.
+
+[PARAGRAPH 9]
+For the background system, data on multifunctional processes were obtained from the Ecoinvent v3.6 cut-off model. Datasets were chosen by regional allocation priority. For domestic H2 production in Germany, the priority was Germany (DE), Europe (RER), Europe without Switzerland (EWS), global (GLO), and rest of the world (RoW). For country-specific results, the datasets of natural gas and electricity supply were adapted to the grid mixes in the respective country.
+
+[TABLE 1]
+BACKGROUND DATABASE PROCESSES USED IN THE STUDY
+Product | Process | Region | Unit
+Process water | Market group for tap water | RER | kg
+Wastewater | Market for wastewater, average | RER | m3
+Deionized water | Market for water, deionized | EWS | kg
+Titanium | Market for titanium, primary | GLO | kg
+High alloyed steel | Market for steel, chromium steel 18/8 | GLO | kg
+Copper | Market for copper | GLO | kg
+Nafion | Market for tetrafluoroethylene | GLO | kg
+Activated carbon | Market for activated carbon, granular | GLO | kg
+Platinum | Market for platinum | GLO | kg
+Concrete | Market for concrete, normal | RoW | m3
+Low alloyed steel | Market for steel, low-alloyed | GLO | kg
+Aluminium | Market for aluminium, cast alloy | GLO | kg
+Natural gas | Market for natural gas, high pressure | DE | m3
+Cast iron | Market for cast iron | GLO | kg
+Gas turbine | Market for gas turbine, 10MW electrical | GLO | unit
+Natural gas pipeline | Market for pipeline, natural gas, long distance, low capacity, onshore | GLO | km
+Diesel | Market group for diesel | RER | kg
+Onshore well, oil/gas | Market for onshore well, oil/gas | GLO | m
+Unalloyed steel | Market for steel, unalloyed | GLO | kg
+Silica sand | Market for silica sand | GLO | kg
+Palladium | Market for palladium | GLO | kg
+Tin | Market for tin | GLO | kg
+Silicon carbide | Market for silicon carbide | GLO | kg
+Oxygen | Market for oxygen, liquid | RER | kg
+Carbon black | Market for carbon black | GLO | kg
+Electricity | Market for electricity, high voltage | DE | kWh
+
+IMPORTANT BENCHMARK DISTINCTION
+The database-process names above belong to the BACKGROUND matching layer. They must not replace the plain foreground flow names from Tables 2-4. For example, a foreground flow stated as Electricity should remain Electricity during paper extraction; Market for electricity, high voltage | DE is an ecoinvent matching target used afterwards.
+
+[TABLE 3]
+REFERENCE-CASE RELATIVE CONTRIBUTIONS TO TOTAL GWI
+The supplementary results confirm that the inventory is evaluated as nine hydrogen-production configurations: SMR; SMR-CCS (56%); SMR-CCS (90%); MP-H2; MP-C; MP-NG; MP-E; PEMEL today; PEMEL future. Categories reported include plant manufacturing, tin, water, natural gas, process-related emissions, electricity and by-products.
