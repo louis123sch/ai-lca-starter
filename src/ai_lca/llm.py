@@ -60,6 +60,13 @@ Protected invariants (must be respected verbatim in extractions):
 10. Treat [VISUAL EVIDENCE: ...] blocks exactly like source evidence: use only what is visibly transcribed there and preserve the asset/document provenance in evidence_text/notes. Do not infer values that the visual-evidence stage did not transcribe.
 11. Include a short evidence_text snippet for every flow. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
 12. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
+
+SUPPLEMENT AND LIST HANDLING (clarification to reduce missed tabulated items):
+- If the SOURCE MATERIAL indicates that component names are presented in tables, numbered lists, or labelled groups (for example "BoP components", "Stack components", "Table X - ... components" or similarly titled lists), explicitly parse those lists as inventory entries. This includes numbered or bullet lists in the main text, labelled groups inside figure/table captions, and machine-readable supplementary blocks provided alongside the paper.
+- For each listed component, create a foreground input flow attached to the appropriate process id in the LOCKED PROCESS STRUCTURE. If the locked structure distinguishes stack vs BoP subprocesses, attach to the specified subprocess; otherwise attach to the parent process. Preserve the component name exactly as printed.
+- If the supplementary material contains amounts or units corresponding to a listed component, extract and attach them. If no numeric amount/unit is present in any provided material, set amount=null and include an evidence snippet pointing to the source table/paragraph/figure.
+- Do not discard items because they appear only in supplementary text, figure captions, or transcribed visual evidence; they are valid sources for explicit component inventories.
+
 """
 
 
