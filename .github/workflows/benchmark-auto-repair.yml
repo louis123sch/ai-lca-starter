@@ -124,7 +124,7 @@ jobs:
         run: |
           git config user.name "ai-lca-benchmark-bot"
           git config user.email "ai-lca-benchmark-bot@users.noreply.github.com"
-          git add src/ai_lca/llm.py repair_result.json
+          git add src/ai_lca/llm.py
           git commit -m "auto-repair: improve unseen-paper extraction"
           git push origin HEAD:main
 
