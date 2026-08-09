@@ -14,15 +14,17 @@ Rules:
 1. Identify only foreground processes/subprocesses supported by the supplied source. Do not invent a process because an input exists.
 2. Distinguish the LCA MODEL from descriptive technology-review prose. Identify product systems/configurations actually assessed in the LCA, not every technology, catalyst, solvent, reactor option, or unit operation discussed in the review.
 3. Prefer the smallest process hierarchy justified by the modeled LCI. A process-flow diagram can show internal unit operations without those being separate foreground LCA processes. Treat LCI tables, goal/scope, system-boundary figures, and explicit model-configuration statements as stronger evidence than generic process-description prose.
-4. Create a subprocess only when the LCA source itself models it separately with its own inventory basis or separately quantified inputs/outputs.
-5. Do not turn background supplies such as electricity, natural gas, water, steel, transport, or chemicals into foreground subprocesses unless the source explicitly models them as such.
-6. Do not infer voltage level, production technology, market dataset, geography code, or other ecoinvent detail from generic flow names.
-7. Extract the primary/reference operational geography when explicit. If the paper additionally assesses country or regional scenarios, record them in additional_geographies rather than replacing the reference geography.
-8. If geography cannot be supported, use not_identified. Never fill it from a user preference list.
-9. Keep construction/capital, operation, maintenance, transport, and end-of-life separate only when the modeled LCI actually distinguishes them.
-10. Include short evidence snippets for every process and for study context where possible. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
-11. Record ambiguity and possible double counting in assumptions_or_warnings.
-12. This is a proposal for human review, not an approved LCA model.
+4. Create a subprocess only when the LCA source itself models it as a separately reusable/interconnected foreground activity with its own reference product or an explicitly quantified exchange to another foreground activity. A separately tabulated inventory category alone is not enough.
+5. Do NOT split a product system merely because its inventory is reported in sections such as stack, balance of plant (BoP), construction/capital, manufacturing, operation, maintenance, transport, replacement, or end-of-life. When those sections are component/life-cycle inventories that are aggregated to assess one technology or product system, attach their flows to that product system unless the source explicitly models exchanges between separate foreground activities.
+6. Conversely, preserve genuinely separate modeled configurations or pathways when the study reports them as distinct alternatives, even if they share technology or upstream inputs. Do not collapse distinct assessed configurations into a parent technology solely because they are related.
+7. Do not turn background supplies such as electricity, natural gas, water, steel, transport, or chemicals into foreground subprocesses unless the source explicitly models them as such.
+8. Do not infer voltage level, production technology, market dataset, geography code, or other ecoinvent detail from generic flow names.
+9. Extract the primary/reference operational geography when explicit. If the paper additionally assesses country or regional scenarios, record them in additional_geographies rather than replacing the reference geography.
+10. If geography cannot be supported, use not_identified. Never fill it from a user preference list.
+11. Before finalising the hierarchy, perform a boundary check: for every proposed child process ask whether the paper quantifies an exchange/reference flow connecting it to another foreground process. If not, and it is only an inventory grouping or life-cycle stage of the assessed product system, merge it into the parent product system. Also check that distinct assessed alternatives have not been accidentally nested under one another.
+12. Include short evidence snippets for every process and for study context where possible. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
+13. Record ambiguity and possible double counting in assumptions_or_warnings.
+14. This is a proposal for human review, not an approved LCA model.
 """
 
 
@@ -38,8 +40,9 @@ Rules:
 6. Preserve the stated basis (per kg product, per year, per plant, etc.). Do not silently convert bases.
 7. Keep outputs/co-products distinct from inputs and elementary emissions.
 8. Do not duplicate the same flow merely because it appears in prose and a table; use the clearest supporting evidence and warn about conflicting values.
-9. Include a short evidence_text snippet for every flow. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
-10. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
+9. Component groups and life-cycle stages (for example stack, BoP, construction, manufacturing, operation, maintenance, transport, replacement, and end-of-life) do not require new process IDs. If the locked structure represents the assessed product system as one process, attach source-supported flows from those inventory sections to that process while preserving their stated basis and evidence.
+10. Include a short evidence_text snippet for every flow. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
+11. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
 """
 
 
