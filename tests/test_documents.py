@@ -40,6 +40,11 @@ def test_document_dispatch_accepts_docx():
     assert "Hydrogen production" in extract_document_text(buffer.getvalue(), "paper.docx")
 
 
+def test_document_dispatch_accepts_utf8_text_fixture():
+    text = "[PAGE 11]\nLCI data of SMR-based hydrogen production"
+    assert extract_document_text(text.encode("utf-8"), "paper_fixture.txt") == text
+
+
 def test_combined_documents_keep_document_markers():
     from ai_lca.documents import combine_document_texts
 
