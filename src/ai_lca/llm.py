@@ -12,16 +12,17 @@ This first pass is PROCESS INTERPRETATION, not inventory completion. Your job is
 
 Rules:
 1. Identify only foreground processes/subprocesses supported by the supplied source. Do not invent a process because an input exists.
-2. Prefer the smallest process hierarchy justified by the source. If the paper models one foreground process, return one process.
-3. Create a subprocess only when the source itself distinguishes it as a separately modelled step, unit operation, or stage with its own relevant inputs/outputs or inventory basis.
-4. Do not turn background supplies such as electricity, natural gas, water, steel, transport, or chemicals into foreground subprocesses unless the source explicitly models them as such.
-5. Do not infer voltage level, production technology, market dataset, geography code, or other ecoinvent detail from generic flow names.
-6. Extract the intended operational geography when explicit. You may mark it inferred only when the source strongly indicates it (for example, a stated plant/site/country or a scenario explicitly framed for one country); explain the rationale and cite source evidence.
-7. If geography cannot be supported, use not_identified. Never fill it from a user preference list.
-8. Keep construction/capital, operation, maintenance, transport, and end-of-life separate only when the source actually distinguishes them.
-9. Include short evidence snippets for every process and for study context where possible. Use [PAGE N], [PARAGRAPH N], and [TABLE N] markers only when present.
-10. Record ambiguity and possible double counting in assumptions_or_warnings.
-11. This is a proposal for human review, not an approved LCA model.
+2. Distinguish the LCA MODEL from descriptive technology-review prose. Identify product systems/configurations actually assessed in the LCA, not every technology, catalyst, solvent, reactor option, or unit operation discussed in the review.
+3. Prefer the smallest process hierarchy justified by the modeled LCI. A process-flow diagram can show internal unit operations without those being separate foreground LCA processes. Treat LCI tables, goal/scope, system-boundary figures, and explicit model-configuration statements as stronger evidence than generic process-description prose.
+4. Create a subprocess only when the LCA source itself models it separately with its own inventory basis or separately quantified inputs/outputs.
+5. Do not turn background supplies such as electricity, natural gas, water, steel, transport, or chemicals into foreground subprocesses unless the source explicitly models them as such.
+6. Do not infer voltage level, production technology, market dataset, geography code, or other ecoinvent detail from generic flow names.
+7. Extract the primary/reference operational geography when explicit. If the paper additionally assesses country or regional scenarios, record them in additional_geographies rather than replacing the reference geography.
+8. If geography cannot be supported, use not_identified. Never fill it from a user preference list.
+9. Keep construction/capital, operation, maintenance, transport, and end-of-life separate only when the modeled LCI actually distinguishes them.
+10. Include short evidence snippets for every process and for study context where possible. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
+11. Record ambiguity and possible double counting in assumptions_or_warnings.
+12. This is a proposal for human review, not an approved LCA model.
 """
 
 
@@ -30,14 +31,14 @@ A first-pass foreground process structure has already been identified. You MUST 
 
 Rules:
 1. Every flow must be attached to one of the supplied process IDs. Never create a new process ID or implicit subprocess.
-2. Extract only flows directly supported by the source text. Your job is extraction, not invention.
-3. Never invent an amount, unit, material, process, functional unit, voltage level, market type, production route, page, table, or paragraph.
+2. Extract only flows that the source indicates are part of the MODELED foreground LCI. Do not extract catalysts, solvents, materials, operating conditions, or technology options merely because they appear in review/process-description prose. Prefer explicit LCI tables and inventory-analysis sections.
+3. Never invent an amount, unit, material, process, functional unit, voltage level, market type, production route, document, page, table, or paragraph.
 4. If the paper says only 'electricity', extract 'electricity'. Do NOT turn it into 'medium-voltage electricity', 'market for electricity', or another ecoinvent-style dataset name unless the source states that detail.
 5. If a flow is mentioned but no amount is given, amount must be null.
 6. Preserve the stated basis (per kg product, per year, per plant, etc.). Do not silently convert bases.
 7. Keep outputs/co-products distinct from inputs and elementary emissions.
 8. Do not duplicate the same flow merely because it appears in prose and a table; use the clearest supporting evidence and warn about conflicting values.
-9. Include a short evidence_text snippet for every flow, with document markers populated only when explicitly available.
+9. Include a short evidence_text snippet for every flow. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
 10. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
 """
 
