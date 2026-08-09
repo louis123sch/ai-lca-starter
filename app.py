@@ -7,10 +7,10 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from ai_lca.brightway_search import list_databases, search_candidates
-from ai_lca.documents import combine_document_texts
+from ai_lca.documents import combine_document_evidence
 from ai_lca.export import dataframe_to_json, extraction_to_dataframe, process_structure_to_dataframe
 from ai_lca.geography import ecoinvent_location_hints
-from ai_lca.llm import extract_inventory_from_text
+from ai_lca.llm import extract_inventory_from_documents, extract_inventory_from_text
 
 load_dotenv()
 
@@ -45,24 +45,34 @@ with paste_tab:
         placeholder="Paste the relevant source material here…",
     )
 
+uploaded_payloads: list[tuple[str, bytes]] = []
+document_preview = ""
+detected_visuals = 0
+ingestion_warnings: list[str] = []
+
 with document_tab:
     uploaded_documents = st.file_uploader(
         "Upload the paper and any supplementary PDF/Word documents",
         type=["pdf", "docx"],
         accept_multiple_files=True,
     )
-    document_preview = ""
     if uploaded_documents:
         try:
-            document_preview = combine_document_texts(
-                [(doc.name, doc.getvalue()) for doc in uploaded_documents]
-            )
+            uploaded_payloads = [(doc.name, doc.getvalue()) for doc in uploaded_documents]
+            document_preview, visual_assets, ingestion_warnings = combine_document_evidence(uploaded_payloads)
+            detected_visuals = len(visual_assets)
             names = ", ".join(doc.name for doc in uploaded_documents)
             st.success(
                 f"Combined {len(uploaded_documents)} source document(s) "
-                f"({len(document_preview):,} characters): {names}"
+                f"({len(document_preview):,} text characters, {detected_visuals} selected visual asset(s)): {names}"
             )
-            with st.expander("Preview combined source text"):
+            if detected_visuals:
+                st.caption(
+                    "Relevant embedded figures/scanned pages will be transcribed with vision before the LCA process/flow passes."
+                )
+            for warning in ingestion_warnings:
+                st.warning(warning)
+            with st.expander("Preview combined native source text"):
                 st.text(document_preview[:16000])
         except Exception as exc:
             st.error(str(exc))
@@ -77,12 +87,23 @@ source_text = pasted_text.strip() or document_preview.strip()
 
 if st.button("1. Interpret paper and extract foreground", type="primary", disabled=not bool(source_text)):
     try:
-        with st.spinner("Identifying process structure, then extracting evidence-backed flows…"):
-            extraction = extract_inventory_from_text(
-                source_text,
-                model=model,
-                extra_instructions=extra_instructions,
-            )
+        if pasted_text.strip():
+            spinner_text = "Identifying process structure, then extracting evidence-backed flows…"
+        else:
+            spinner_text = "Reading text and figures, identifying process structure, then extracting evidence-backed flows…"
+        with st.spinner(spinner_text):
+            if uploaded_payloads and not pasted_text.strip():
+                extraction = extract_inventory_from_documents(
+                    uploaded_payloads,
+                    model=model,
+                    extra_instructions=extra_instructions,
+                )
+            else:
+                extraction = extract_inventory_from_text(
+                    source_text,
+                    model=model,
+                    extra_instructions=extra_instructions,
+                )
         st.session_state["extraction"] = extraction
         st.session_state["inventory_df"] = extraction_to_dataframe(extraction)
         st.session_state.pop("candidates", None)
