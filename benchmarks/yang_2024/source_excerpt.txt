@@ -1,0 +1,17 @@
+[DOCUMENT: Yang et al. 2024, Science of the Total Environment 920, 171065]
+
+The study compares two hydrogen production routes with a cradle-to-gate system boundary and a functional unit of producing 1 kg of hydrogen. The two assessed LCA product systems are DSSW alkaline-catalysed hydrolysis (DACH) and alkaline water electrolysis (AEL). Review discussion of PEM and SOEC is descriptive and is not part of the assessed foreground LCA.
+
+DACH is assessed during the hydrogen-production process only. It contains two main inventory stages: removal of surface oxides, and hydrolysis/hydrogen production. Reaction-vessel impacts are excluded.
+
+Table 1. Life-cycle inventory of DACH for 1 kg H2.
+Oxide removal inputs: DSSW 5.71 kg; hydrofluoric acid 0.14 kg; ethanol 18.02 kg; deionized water 67.25 kg. Oxide removal output: DSSW (oxide removal) 5.54 kg.
+Hydrolysis/hydrogen-production inputs: DSSW (oxide removal) 5.54 kg; solid potassium hydroxide 22.15 kg; deionized water 3.56 kg. Output: hydrogen 1.00 kg.
+
+AEL is assessed over electrolytic-cell manufacturing and operation. Auxiliary BOP equipment, hydrogen storage and transport are excluded. The alkaline electrolysis system has a hydrogen-production capacity of 26 kg/h, a lifetime of 10 years, and 7500 h/y full-load operation.
+
+Table 2. Life-cycle inventory of AEL for 1 kg H2.
+Manufacturing: low-alloyed steel 6.62E-3 kg; nickel 1.03E-4 kg; chromium 1.03E-4 kg; aluminum 3.23E-5 kg; zirconium oxide 5.62E-5 kg; polysulfone 1.33E-5 kg; polyphenylene sulfide 1.74E-5 kg; polyethylene 2.56E-5 kg; synthetic rubber 3.81E-6 kg.
+Operation: electricity 49.00 kWh; deionized water 11.20 kg; potassium hydroxide 8.50E-4 kg.
+
+The paper reports GWP results of 87.78 kg CO2-eq/kg H2 for DACH and 30.76 kg CO2-eq/kg H2 for AEL. These impact results are validation context, not foreground inventory flows.
