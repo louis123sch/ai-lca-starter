@@ -64,19 +64,44 @@ def _norm(value: Any) -> str:
     return " ".join(re.sub(r"[^a-z0-9%]+", " ", text).split())
 
 
+_GENERIC_NAME_QUALIFIERS = {
+    "foreground", "lca", "process", "product", "system", "activity",
+    "cradle", "gate", "model", "modelled", "modeled", "study", "to",
+}
+
+
+def _name_core(value: Any) -> str:
+    """Normalize a process/flow label while dropping only generic modelling qualifiers.
+
+    This is an evaluator convenience, not an extraction rule: technology/material terms
+    and token order are preserved. It lets concise gold labels match descriptive forms
+    such as "X to Y (foreground product system)" without adding paper-specific aliases.
+    """
+    return " ".join(token for token in _norm(value).split() if token not in _GENERIC_NAME_QUALIFIERS)
+
+
 def _score_name(name: str, aliases: list[str]) -> float:
     a = _norm(name)
+    a_core = _name_core(name)
     scores = []
     for alias in aliases:
         b = _norm(alias)
+        b_core = _name_core(alias)
         if not a or not b:
             scores.append(0.0)
         elif a == b:
             scores.append(1.0)
+        elif a_core and b_core and a_core == b_core:
+            scores.append(0.97)
         elif min(len(a), len(b)) >= 5 and (a in b or b in a):
             scores.append(0.93)
+        elif min(len(a_core), len(b_core)) >= 5 and (a_core in b_core or b_core in a_core):
+            scores.append(0.91)
         else:
-            scores.append(SequenceMatcher(None, a, b).ratio())
+            scores.append(max(
+                SequenceMatcher(None, a, b).ratio(),
+                SequenceMatcher(None, a_core, b_core).ratio() if a_core and b_core else 0.0,
+            ))
     return max(scores, default=0.0)
 
 
