@@ -19,5 +19,7 @@ jobs:
           cache: pip
       - name: Install package and tests
         run: python -m pip install -e ".[test]"
+      - name: Compile application and package
+        run: python -m compileall -q app.py src tests
       - name: Run deterministic test suite
         run: python -m pytest -q
