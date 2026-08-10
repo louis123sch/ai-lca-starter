@@ -1,0 +1,119 @@
+name: Gerloff branch full benchmark
+
+on:
+  push:
+    branches: [feat/gerloff-fast-visual-regression]
+    paths:
+      - ".github/workflows/gerloff-branch-full.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: gerloff-branch-full-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-gerloff:
+    name: Full Gerloff benchmark on feature branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5-mini
+      OPENAI_VISION_MODEL: gpt-5-mini
+      AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+      AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: python -m pip install -e ".[test]"
+
+      - name: Run deterministic tests
+        run: python -m pytest -q
+
+      - name: Verify OpenAI secret exists
+        shell: bash
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::Repository secret OPENAI_API_KEY is missing."
+            exit 2
+          fi
+
+      - name: Build normalized image-only source fixture
+        run: python benchmarks/gerloff_2021/build_visual_fixture.py
+
+      - name: Run full Gerloff multimodal benchmark
+        shell: bash
+        run: |
+          bash scripts/run_resilient_benchmark.sh \
+            python -m ai_lca.benchmark_multimodal \
+              --expected benchmarks/gerloff_2021/expected.json \
+              --source \
+                benchmarks/gerloff_2021/source_main_excerpt.txt \
+                benchmarks/gerloff_2021/source_supplement_machine_readable.txt \
+                benchmarks/gerloff_2021/source_visual_inventory.docx \
+              --runs 3 \
+              --model "$OPENAI_MODEL" \
+              --max-visual-assets 8 \
+              --output-dir benchmark_runs/gerloff_2021
+
+      - name: Enforce existing Gerloff quality gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import statistics
+          from pathlib import Path
+
+          out = Path("benchmark_runs/gerloff_2021")
+          summary = json.loads((out / "summary.json").read_text())
+          reports = [json.loads(p.read_text()) for p in sorted(out.glob("report_run_*.json"))]
+
+          mean_score = float(summary["mean_overall_score"])
+          min_score = float(summary["min_overall_score"])
+          process_recall = float(summary["mean_process_recall"])
+          process_precision = float(summary["mean_process_precision"])
+          flow_recall = float(summary["mean_flow_recall"])
+          flow_precision = float(summary["mean_flow_precision"])
+          amount_accuracy = statistics.fmean(float(r["amount_accuracy"]) for r in reports)
+
+          print(f"Mean overall score:      {mean_score:.3f}")
+          print(f"Minimum run score:       {min_score:.3f}")
+          print(f"Mean process recall:     {process_recall:.3f}")
+          print(f"Mean process precision:  {process_precision:.3f}")
+          print(f"Mean flow recall:        {flow_recall:.3f}")
+          print(f"Mean flow precision:     {flow_precision:.3f}")
+          print(f"Mean amount accuracy:    {amount_accuracy:.3f}")
+
+          failures = []
+          if mean_score < 0.85: failures.append(f"mean overall score {mean_score:.3f} < 0.850")
+          if min_score < 0.80: failures.append(f"minimum run score {min_score:.3f} < 0.800")
+          if process_recall < 0.90: failures.append(f"process recall {process_recall:.3f} < 0.900")
+          if process_precision < 0.90: failures.append(f"process precision {process_precision:.3f} < 0.900")
+          if flow_recall < 0.85: failures.append(f"flow recall {flow_recall:.3f} < 0.850")
+          if flow_precision < 0.85: failures.append(f"flow precision {flow_precision:.3f} < 0.850")
+          if amount_accuracy < 0.85: failures.append(f"amount accuracy {amount_accuracy:.3f} < 0.850")
+          if failures:
+              print("Gerloff unseen benchmark gate failed:")
+              for failure in failures: print(f" - {failure}")
+              raise SystemExit(1)
+          print("Gerloff unseen benchmark gate passed.")
+          PY
+
+      - name: Upload Gerloff benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gerloff-branch-full-${{ github.run_id }}
+          path: benchmark_runs/gerloff_2021
+          if-no-files-found: warn
+          retention-days: 30
