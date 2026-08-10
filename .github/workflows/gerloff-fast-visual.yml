@@ -8,6 +8,7 @@ on:
       - "src/ai_lca/llm.py"
       - "src/ai_lca/documents.py"
       - "src/ai_lca/benchmark_visual_evidence.py"
+      - "src/ai_lca/benchmark_visual_to_flows.py"
       - "tests/test_visual_evidence_benchmark.py"
       - "benchmarks/gerloff_2021/build_visual_fixture.py"
       - "benchmarks/gerloff_2021/visual_flows.csv"
@@ -27,6 +28,7 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_VISION_MODEL: gpt-5-mini
+      OPENAI_MODEL: gpt-5-mini
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +55,7 @@ jobs:
       - name: Build image-only Gerloff fixture
         run: python benchmarks/gerloff_2021/build_visual_fixture.py
 
-      - name: Run visual-only extraction regression
+      - name: Run visual transcription regression
         run: |
           python -m ai_lca.benchmark_visual_evidence \
             --source benchmarks/gerloff_2021/source_visual_inventory.docx \
@@ -63,11 +65,24 @@ jobs:
             --min-recall 0.95 \
             --output benchmark_runs/gerloff_2021/fast_visual_report.json
 
-      - name: Upload fast visual report
+      - name: Run visual-to-flow regression
+        run: |
+          python -m ai_lca.benchmark_visual_to_flows \
+            --source benchmarks/gerloff_2021/source_visual_inventory.docx \
+            --expected benchmarks/gerloff_2021/visual_flows.csv \
+            --model "$OPENAI_MODEL" \
+            --max-visual-assets 8 \
+            --min-recall 0.95 \
+            --min-precision 0.95 \
+            --output benchmark_runs/gerloff_2021/fast_visual_to_flow_report.json
+
+      - name: Upload fast visual reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gerloff-fast-visual-${{ github.run_id }}
-          path: benchmark_runs/gerloff_2021/fast_visual_report.json
+          path: |
+            benchmark_runs/gerloff_2021/fast_visual_report.json
+            benchmark_runs/gerloff_2021/fast_visual_to_flow_report.json
           if-no-files-found: warn
           retention-days: 30
