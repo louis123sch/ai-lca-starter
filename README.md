@@ -1,75 +1,99 @@
-# AI-LCA Starter
+# AI-LCA Paper Extractor
 
-A local research prototype for:
+A local, human-in-the-loop research tool for turning LCA papers into evidence-linked foreground inventories and reviewed Brightway models.
 
-**paste text / upload PDF or DOCX → identify the paper's foreground process structure and study context → extract evidence-backed flows → human review → Brightway/ecoinvent candidate search → human-selected mapping**
+**PDF/DOCX/text → native + visual evidence → process-role classification → locked foreground graph → flow extraction → human review → Brightway candidate mapping → optional strict foreground database write**
 
-The architectural rule remains:
+The architectural rule is:
 
-> **AI proposes → deterministic validation → human reviews → Brightway supplies real background datasets.**
+> **AI proposes from source evidence → deterministic rules lock/validate structure → human reviews → Brightway supplies real background nodes.**
 
-The LLM does not calculate LCIA and does not fabricate ecoinvent datasets.
+The extractor does not calculate LCIA, fill missing LCI from the public web, invent ecoinvent datasets, silently convert units, or choose co-product allocation on the user's behalf.
 
-## What changed in v0.2
+## v0.4 candidate: moving out of benchmark tuning
 
-The main change is **schema-first paper interpretation**. The tool no longer asks one model call to produce a flat inventory immediately.
+The current development phase replaces repeated paper-specific prompt tuning with an explicit, testable process-role decision layer.
 
-1. **Process/context pass** — identify only the foreground processes and subprocesses the source actually models, plus functional unit, system boundary and operational geography where supported.
-2. **Flow pass** — extract materials, energy, transport, outputs and emissions, but each flow must attach to one of those locked process IDs. The second pass is not allowed to create extra processes.
-3. **Human review** — inspect the process hierarchy, context, values and evidence before background matching.
-4. **Brightway matching** — search only real activities in the installed database. Paper-derived geography can softly promote matching locations but never filters the candidate list or comes from a manual preference field.
+Before a process can enter the locked foreground graph, each process-like source entity is classified as one of:
 
-This is intended to reduce two specific failure modes from the first prototype:
+- `assessed_product_system`
+- `interconnected_foreground_process`
+- `internal_stage`
+- `shared_supporting_activity`
+- `background_supply`
+- `descriptive_only`
 
-- **invented detail**, such as turning generic `electricity` into an unsupported medium-voltage electricity dataset;
-- **process fragmentation**, where one foreground process in the paper is unnecessarily split into multiple pseudo-subprocesses, causing redundant candidate searches.
+Only the first two roles are deterministically promoted into foreground process IDs. This is intended to address the general failure class exposed by development/holdout work: internal inventory stages and shared supporting activities being mistaken for independently assessed foreground processes.
 
-Identical flow queries are now searched once and reused, and the highest-ranked real candidate is preselected in the dropdown while remaining editable.
+The app now also supports human process review before mapping: keep/remove, rename, re-parent, or merge proposed foreground processes. Flow reassignment after a merge is deterministic and the original AI classifications remain in the audit trail.
 
-## Supported inputs
+## Evidence ingestion
+
+Supported inputs:
 
 - pasted text;
-- text-readable PDF, extracted locally with `[PAGE N]` provenance markers;
-- Word `.docx`, extracted locally with paragraph and table provenance markers.
+- PDF, including native text plus selected embedded figures/pages for multimodal transcription;
+- Word `.docx`, including paragraphs, tables and selected embedded visual evidence;
+- multiple main/supplementary documents in one extraction.
 
-Scanned/image-only PDFs still need a later multimodal path.
+Visual evidence is transcribed before LCA interpretation. The visual stage is evidence transcription only; it does not decide process structure or map to ecoinvent.
 
-## Study geography
+## Extraction architecture
 
-There is no longer a manual `GB,RER,GLO,RoW` geography preference box. The extraction shows the **operational geography represented by the paper** when the source supports one and labels it as explicit or inferred. A small deterministic mapping converts common country/region names into conservative ecoinvent location hints for **soft ranking only**. If the source does not establish geography, no location is forced.
+1. **Evidence ingestion** — combine source documents with provenance markers and visual transcriptions.
+2. **Candidate activity classification** — identify process-like source entities and classify their role in the actual LCA model.
+3. **Deterministic foreground locking** — only assessed product systems and explicitly interconnected foreground processes enter the locked graph.
+4. **Locked flow extraction** — extract source-supported materials, energy, transport, products and emissions without creating new process IDs.
+5. **Human process review** — merge/remove/rename/re-parent processes and review reference products/units.
+6. **Human inventory review** — edit/include/exclude flows while retaining source evidence.
+7. **Brightway matching** — search only real nodes in the selected local Brightway databases. Paper geography is a soft ranking hint for technosphere search; emissions are searched in a biosphere database.
+8. **Strict database write** — create a new local Brightway foreground database only after explicit confirmation and only when the reviewed model can be represented without hidden modelling assumptions.
 
-## Relationship to Zhang et al. (2026), *Sustainability assessment using multimodal artificial intelligence agents*
+## Strict Brightway writer
 
-This project does **not copy their code**. It adopts a useful architectural idea from the paper/repository: establish a structured LCI representation first, then populate and review it with evidence rather than asking an LLM for an unconstrained final inventory in one shot.
+The v0.4 writer supports:
 
-Their system uses an LCA agent to choose/design a schema and critique an inventory, while a stakeholder agent fills it iteratively using retrieval tools. This project narrows that concept to literature-to-Brightway foreground modelling:
+- one reviewed production activity per retained foreground process;
+- mapped technosphere inputs;
+- mapped biosphere emissions;
+- explicit foreground-to-foreground input links;
+- extraction/version metadata on created foreground activities.
 
-- the **first pass** plays the role of structure/schema definition, but the schema is the process hierarchy evidenced in the supplied paper;
-- the **second pass** fills that locked structure with cited foreground flows;
-- Pydantic validation prevents flows from referencing process IDs that were not identified in the first pass;
-- the human remains the final reviewer before ecoinvent mappings are used.
+It deliberately blocks writing when:
 
-Unlike the published agent system, this prototype does not search the public web to fill missing data and deliberately does not let iterative agents fill evidence gaps with external estimates. That restriction is important for the current research goal: reconstruct what the source paper actually modelled before adding any gap-filling functionality.
+- an included quantitative exchange has no amount;
+- a process lacks a reviewed reference product/unit;
+- an input/emission has no selected mapping;
+- source and mapped units differ and would require an unapproved conversion;
+- an additional output/co-product would require an allocation/production modelling decision;
+- a flow direction is unresolved.
 
-Reference: Zhang, Z. et al. (2026), *Nature Electronics*, DOI 10.1038/s41928-026-01653-w.
+The writer never overwrites an existing Brightway database.
 
-## Recommended setup on your Mac / VS Code
+## Reproducibility
 
-Use your existing working Brightway 2.5 environment. From the project directory:
+Every extraction records:
+
+- extractor package version;
+- OpenAI model name;
+- Git commit SHA when available;
+- UTC generation time;
+- whether the source path was text or documents.
+
+The app can export a reproducible review bundle containing the structured extraction, reviewed inventory rows and selected Brightway mappings.
+
+## Recommended setup on Mac / VS Code
+
+Use the Python environment in which your Brightway project already works.
 
 ```bash
-python -m pip install -e .
-```
-
-The update adds `python-docx` for Word ingestion.
-
-## Configure the API key
-
-```bash
+git clone <your-repository-clone-url>
+cd ai-lca-starter
+python -m pip install -e ".[test]"
 cp .env.example .env
 ```
 
-Then edit `.env`:
+Edit `.env`:
 
 ```text
 OPENAI_API_KEY=your_key_here
@@ -79,91 +103,48 @@ BRIGHTWAY_PROJECT=the_exact_name_of_your_existing_project
 
 Do not commit `.env`.
 
-## Run the app
+Run deterministic tests:
+
+```bash
+python -m pytest -q
+```
+
+Run the app:
 
 ```bash
 streamlit run app.py
 ```
 
-## Workflow
+## App workflow
 
-1. Paste source text or upload a text-readable PDF/DOCX.
-2. Add study-specific instructions only if necessary.
-3. Click **Interpret paper and extract foreground**.
-4. Check the detected process hierarchy first. If the paper has one process, the tool should normally show one process.
-5. Check operational geography, functional unit, system boundary and warnings.
-6. Review/edit the foreground inventory and its evidence.
-7. Select the Brightway project and ecoinvent database.
-8. Click **Search ecoinvent candidates**.
-9. Review the preselected top candidate for each included flow and change it where needed.
-10. Export the reviewed inventory and selected mappings.
+1. Paste text or upload the paper and supplementary PDF/DOCX files.
+2. Click **Interpret paper and extract foreground**.
+3. Inspect the retained/rejected candidate-activity classifications.
+4. Review the process structure. Merge/remove/rename/re-parent only where the paper supports the edit.
+5. Apply process review.
+6. Review amounts, units, directions, foreground links and evidence in the inventory.
+7. Select the local Brightway project and technosphere database.
+8. Search candidates and review each selected mapping.
+9. Download the audit/review bundle.
+10. If the strict write validator passes, explicitly confirm and create a new Brightway foreground database.
 
-## Project structure
+## Benchmarking and generalisation
 
-```text
-ai-lca-starter/
-├── app.py
-├── src/ai_lca/
-│   ├── models.py             # process hierarchy, context and flow schemas
-│   ├── documents.py          # local PDF + DOCX text extraction
-│   ├── geography.py          # conservative paper-context → ecoinvent location hints
-│   ├── llm.py                # two-pass structured extraction
-│   ├── brightway_search.py   # real Brightway candidate retrieval + soft geo ranking
-│   ├── benchmark.py          # repeated paper-grounded regression evaluation
-│   └── export.py
-├── benchmarks/
-│   └── hermesmann_2022/      # Benchmark 001 ground truth
-├── notebooks/
-├── tests/
-├── data/
-├── .env.example
-└── pyproject.toml
-```
+Historical benchmark results and gold standards are preserved. See `benchmarks/BENCHMARK_POLICY.md` for the development/regression/unseen/holdout rules and `AUTONOMOUS_ITERATION_PROTOCOL.md` for the reusable autonomous iteration method.
 
-## Still deliberately out of scope
+The next validation phase should use a frozen extractor SHA and a new batch of untouched papers rather than repeatedly tuning against the existing 001–006 suite.
 
-- OCR/multimodal extraction for scanned PDFs and complex figures;
-- automatic creation of the persistent Brightway foreground database;
-- LCIA, Monte Carlo or dynamic grid APIs;
-- external web gap filling;
-- automatic approval of mappings.
-
-Those should come only after the paper-to-foreground extraction has been benchmarked against known inventories.
-
-## Regression benchmark: Hermesmann & Müller (2022)
-
-The repository now includes a paper-grounded benchmark under `benchmarks/hermesmann_2022/`.
-It treats the paper's explicitly modeled LCI in Tables 2–4 as the core foreground ground truth: nine hydrogen-production configurations and 119 quantified foreground flows. The supplementary information supplies expected ecoinvent background mappings, while remaining separate from foreground flow naming.
-
-The benchmark is designed to catch the failure modes that matter for paper-to-Brightway reconstruction:
-
-- missing modeled processes or flows;
-- invented/over-decomposed foreground subprocesses;
-- materials mentioned only in review prose being mistaken for modeled LCI flows;
-- background ecoinvent names such as `market for ...` leaking into foreground flow names;
-- wrong amount, unit, direction, functional unit, system boundary, or reference geography.
-
-The application can now ingest the paper and supplementary documents together. Each source is wrapped in a `[DOCUMENT: filename]` marker so evidence provenance remains unambiguous even when page numbers restart in different files.
-
-### Run a repeated live benchmark
-
-With `OPENAI_API_KEY` configured, run:
+A benchmark can still be run from the CLI when source files are available locally:
 
 ```bash
 ai-lca-benchmark live \
   --expected benchmarks/hermesmann_2022/expected.json \
   --source "path/to/main-paper.pdf" "path/to/supplement.docx" \
-  --runs 5
+  --runs 3
 ```
 
-Each run saves the structured extraction and a scored report under `benchmark_runs/hermesmann_2022/`, plus an aggregate summary. Repeating the same source several times is intentional: it measures extraction stability as well as one-off accuracy.
+## Current finish line
 
-To score an extraction JSON that already exists:
+The paper extractor is considered v1-ready when a user can upload a previously unseen paper and supplement, receive an evidence-linked foreground graph and inventory, correct it in the UI, map retained exchanges to real Brightway nodes, and create/export a reproducible local foreground model without manually retyping the paper.
 
-```bash
-ai-lca-benchmark evaluate \
-  --expected benchmarks/hermesmann_2022/expected.json \
-  --extraction benchmark_runs/hermesmann_2022/extraction_run_01.json
-```
-
-The benchmark source documents themselves are not committed to the repository; only the derived factual ground truth and evaluation rules are stored.
+The remaining research validation task is blind testing on a larger untouched paper set. New features such as LCIA, Monte Carlo, dynamic grid APIs or web-based gap filling are separate follow-on work and should not delay the extractor v1 release.
