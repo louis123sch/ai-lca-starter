@@ -69,6 +69,7 @@ Rules:
 Protected extraction invariants:
 - explicit component lists are valid inventory evidence;
 - listed components remain foreground input flows, not background subprocesses;
+- do not reclassify such tabulated components as background subprocesses;
 - it is better to retain an explicit listed inventory item with amount=null than to invent or omit a quantity.
 """
 
