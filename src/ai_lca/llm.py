@@ -8,71 +8,68 @@ from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from .documents import VisualAsset, combine_document_evidence
-from .models import FlowExtraction, ForegroundStructure, InventoryExtraction
+from .models import FlowExtraction, ForegroundInterpretation, ForegroundStructure, InventoryExtraction
+from .runtime import build_extraction_provenance
+from .structure import lock_foreground_interpretation
 
 
 STRUCTURE_SYSTEM_PROMPT = """You are assisting with life-cycle inventory (LCI) construction from a supplied paper or technical document.
-This first pass is PROCESS INTERPRETATION, not inventory completion. Your job is to identify the foreground process structure the source actually represents.
+This first pass is PROCESS INTERPRETATION, not inventory completion.
+
+Your task has two conceptual stages inside one structured response:
+A. Identify process-like entities that a reader might plausibly mistake for foreground processes.
+B. Classify every such candidate by its role in the actual LCA model. A deterministic downstream step will only promote candidates classified as assessed_product_system or interconnected_foreground_process.
+
+Use exactly these role meanings:
+- assessed_product_system: a product system, pathway, configuration, or alternative that is itself assessed/reported by the LCA on the study functional-unit basis.
+- interconnected_foreground_process: a separately modelled foreground activity with its own reference product or explicit quantified foreground exchange to another retained activity.
+- internal_stage: a unit operation, life-cycle stage, inventory section, or internal bookkeeping stage belonging to a retained product system rather than an independently modelled activity.
+- shared_supporting_activity: a foreground-looking service/infrastructure/activity shared by assessed alternatives but not itself an independently assessed product system and not evidenced as a separately interconnected foreground process.
+- background_supply: electricity, fuels, materials, transport, chemicals, water, waste treatment or other supplied activities that belong as inventory exchanges/background data unless the source explicitly models them as foreground.
+- descriptive_only: technology/process discussion that is not part of the modelled LCA inventory or assessed alternatives.
 
 Rules:
-1. Identify only foreground processes/subprocesses supported by the supplied source. Do not invent a process because an input exists.
-2. Distinguish the LCA MODEL from descriptive technology-review prose. Identify product systems/configurations actually assessed in the LCA, not every technology, catalyst, solvent, reactor option, or unit operation discussed in the review.
-3. Prefer the smallest process hierarchy justified by the modeled LCI. A process-flow diagram can show internal unit operations without those being separate foreground LCA processes. Treat LCI tables, goal/scope, system-boundary figures, and explicit model-configuration statements as stronger evidence than generic process-description prose.
-4. Create a subprocess only when the LCA source itself models it as a separately reusable/interconnected foreground activity with its own reference product, or when it is assessed as an independently modelled foreground activity or alternative and is not merely an internal inventory stage. An explicitly quantified exchange between stages can indicate a real subprocess, but is not by itself sufficient if the paper frames the items as inventory stages, table sections, or internal bookkeeping for the same reference product—do not split in those cases. A separately tabulated inventory category alone is not enough.
-4a. Clarification for tabulated inventory stages: when a paper presents table sections or labelled inventory-stage lists (for example, "X inputs" and "X outputs") but reports all values per the same reference product or functional unit, treat these as internal inventory stages of the parent process and do NOT create separate subprocesses. Only create a subprocess if the paper explicitly gives that stage a distinct reference product, models it as a separate foreground activity with its own quantified exchange/reference flow to another foreground process, or otherwise states it is assessed independently.
-5. Do NOT split a product system merely because its inventory is reported in sections such as stack, balance of plant (BoP), construction/capital, manufacturing, operation, maintenance, transport, replacement, or end-of-life. When those sections are component/life-cycle inventories that are aggregated to assess one technology or product system, attach their flows to that product system unless the source explicitly models exchanges between separate foreground activities.
-6. Conversely, preserve genuinely separate modeled configurations or pathways when the study reports them as distinct alternatives, even if they share technology or upstream inputs. Do not collapse distinct assessed configurations into a parent technology solely because they are related.
-7. Do not turn background supplies such as electricity, natural gas, water, steel, transport, or chemicals into foreground subprocesses unless the source explicitly models them as such.
-8. Do not infer voltage level, production technology, market dataset, geography code, or other ecoinvent detail from generic flow names.
-9. Extract the primary/reference operational geography when explicit. If the paper additionally assesses country or regional scenarios, record them in additional_geographies rather than replacing the reference geography.
+1. Classify from the LCA MODEL, not from descriptive technology-review prose. Goal/scope, system-boundary figures, LCI tables, explicit scenario definitions and quantified foreground exchanges outweigh generic process descriptions.
+2. Prefer the smallest foreground graph justified by source evidence. A process-flow diagram can show several unit operations while the LCA still models one product system.
+3. A table section, component list, stack/BoP section, construction/manufacturing/operation/maintenance/transport/replacement/end-of-life section, or shared functional-unit basis does not by itself establish a separate foreground process.
+4. Preserve genuinely separate assessed alternatives/configurations even when they share technologies or upstream inputs.
+5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity, normally through its own reference product/reference unit or an explicit quantified foreground exchange. Do not manufacture a reference product to justify promotion.
+6. Shared support activities should remain shared_supporting_activity unless the source explicitly gives them the independent foreground-activity status described above.
+7. Do not turn background supplies such as electricity, natural gas, water, steel, transport, or chemicals into foreground processes unless the source explicitly models them as such.
+8. Do not infer voltage level, production technology, market dataset, geography code, reference product, unit, or other ecoinvent detail from generic wording.
+9. Extract the primary/reference operational geography when explicit. If additional country or regional scenarios are assessed, record them in additional_geographies rather than replacing the reference geography.
 10. If geography cannot be supported, use not_identified. Never fill it from a user preference list.
-11. Before finalising the hierarchy, perform a boundary check: for every proposed child process ask whether the paper quantifies an exchange/reference flow connecting it to another foreground process. If not, and it is only an inventory grouping or life-cycle stage of the assessed product system, merge it into the parent product system. Also check that distinct assessed alternatives have not been accidentally nested under one another.
-12. Include short evidence snippets for every process and for study context where possible. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
-13. Record ambiguity and possible double counting in assumptions_or_warnings.
+11. Use concise source-derived candidate identifiers. If the study uses stable acronyms/short labels, use them consistently. Do not embed capacities, functional-unit text, or explanatory parentheticals in IDs/names.
+12. Include short evidence snippets and a brief evidence-grounded rationale for every candidate. Populate document/page/paragraph/table only from explicit provenance markers.
+13. Record ambiguity or possible double counting in assumptions_or_warnings.
 14. This is a proposal for human review, not an approved LCA model.
-15. Naming and identifiers: emit concise, machine-friendly process identifiers and short display names. If the study uses acronyms or short labels (e.g. technology acronyms), derive a short lowercase id from them (for example, when the paper repeatedly uses an acronym like "AEC", use "aec" as the id). Avoid embedding capacity, basis text, or parenthetical qualifiers (for example "1 MW" or "per 1 kg H2") inside the primary process name; record such metadata (capacity, basis) in the functional_unit or study_context fields. Use these short ids consistently and include them in every evidence snippet so downstream extraction and matching can rely on stable keys.
 """
 
 
 FLOW_SYSTEM_PROMPT = """You are extracting foreground LCI flows from a supplied paper or technical document.
-A first-pass foreground process structure has already been identified. You MUST fill that structure; you may not redesign it.
+A first-pass foreground process structure has already been identified and locked. You MUST fill that structure; you may not redesign it.
 
 Rules:
-1. Every flow must be attached to one of the supplied process IDs. Never create a new process ID or implicit subprocess. Use the process ids exactly as provided in the LOCKED PROCESS STRUCTURE (they are expected to be short, stable ids derived from the study's own labels).
-2. Extract only flows that the source indicates are part of the MODELED foreground LCI. Do not extract catalysts, solvents, materials, operating conditions, or technology options merely because they appear in review/process-description prose. Prefer explicit LCI tables and inventory-analysis sections.
-2a. When the source presents explicit component lists, BoP/stack tables, or "Table of components" for a modelled product system, treat each listed component as a foreground input flow to that assessed product system (or to the specified subcomponent if the locked structure includes a distinct subprocess for stack/BoP). Extract the component names and any provided amounts/units exactly as given; do not reclassify such tabulated components as background subprocesses.
+1. Every flow must be attached to one supplied process ID. Never create a new process ID or implicit subprocess.
+2. Extract only flows that the source indicates are part of the MODELED foreground LCI. Do not extract catalysts, solvents, materials, operating conditions, or technology options merely because they appear in descriptive prose. Prefer explicit LCI tables and inventory-analysis sections.
+3. Explicit component lists, BoP/stack tables, component tables, numbered inventory lists, supplementary tables, and transcribed visual tables are valid source evidence. Attach their listed components as foreground input flows to the appropriate locked process. Do not promote components into subprocesses.
+4. Preserve printed component/flow names and word order rather than canonicalising them into ecoinvent-style wording. If multiple source locations use variants, prefer one source-supported name and record ambiguity in notes/warnings.
+5. Never invent an amount, unit, material, process, functional unit, voltage level, market type, production route, document, page, table, or paragraph.
+6. If the paper says only 'electricity', extract 'electricity'. Do not turn it into 'medium-voltage electricity', 'market for electricity', or another background dataset name unless the source states that detail.
+7. If a flow is mentioned but no amount is given, amount must be null.
+8. Preserve the stated basis (per kg product, per year, per plant, etc.). Do not silently convert bases.
+9. Keep outputs/co-products distinct from inputs and elementary emissions.
+10. Do not duplicate the same flow merely because it appears in prose and a table; use the clearest supporting evidence and warn about conflicting values.
+11. Internal stages/component groups do not require new process IDs. If the locked structure has one process, attach source-supported flows from its internal inventory sections to that process.
+12. linked_process_id is ONLY for an explicit foreground-to-foreground exchange between two IDs already present in the locked structure. Set it null for ordinary background inputs, emissions, and outputs. Never infer a link merely because two processes use the same material or service.
+13. Treat [VISUAL EVIDENCE: ...] blocks exactly like source evidence: use only visibly transcribed content and preserve provenance.
+14. Include a short evidence_text snippet for every flow. Populate document/page/paragraph/table only from explicit source markers.
+15. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
 
-IMPORTANT CLARIFICATION (applies to main text, supplement, and visual evidence):
-- When component lists or tabulated components appear anywhere in the provided SOURCE MATERIAL (including main paper tables, supplementary machine-readable tables, or transcribed visual evidence blocks), treat them as explicit inventory items to be attached as foreground inputs to the modelled product system. Do not omit tabulated components simply because they appear in a supplement or a figure rather than the main prose.
-- Preserve the component names and any available amounts/units exactly as printed; if no amount is given, set amount=null and include an evidence snippet pointing to the table/figure.
-
-Protected invariants (must be respected verbatim in extractions):
-- explicit component lists
-- foreground input flow
-- do not reclassify such tabulated components as background subprocesses
-
-ADDITIONAL VERBATIM GUIDANCE TO AVOID PARAPHRASING ERRORS:
-- When a component name is printed in source material, copy the exact string of characters and word order into the extracted flow name. Do NOT paraphrase, normalize, reorder, or canonicalize component names in any way. For example, do not change "foundation concrete" to "concrete for foundation" or vice versa; preserve whichever form the source uses. If multiple source locations use slightly different wording for the same component, include a single flow with the primary extracted name and list the alternative source locations in the evidence_text or assumptions_or_warnings rather than altering the name.
-
-3. Never invent an amount, unit, material, process, functional unit, voltage level, market type, production route, document, page, table, or paragraph.
-4. If the paper says only 'electricity', extract 'electricity'. Do NOT turn it into 'medium-voltage electricity', 'market for electricity', or another ecoinvent-style dataset name unless the source states that detail.
-5. If a flow is mentioned but no amount is given, amount must be null.
-6. Preserve the stated basis (per kg product, per year, per plant, etc.). Do not silently convert bases.
-7. Keep outputs/co-products distinct from inputs and elementary emissions.
-8. Do not duplicate the same flow merely because it appears in prose and a table; use the clearest supporting evidence and warn about conflicting values.
-9. Component groups and life-cycle stages (for example stack, BoP, construction, manufacturing, operation, maintenance, transport, replacement, and end-of-life) do not require new process IDs. If the locked structure represents the assessed product system as one process, attach source-supported flows from those inventory sections to that process while preserving their stated basis and evidence.
-10. Treat [VISUAL EVIDENCE: ...] blocks exactly like source evidence: use only what is visibly transcribed there and preserve the asset/document provenance in evidence_text/notes. Do not infer values that the visual-evidence stage did not transcribe.
-11. Include a short evidence_text snippet for every flow. Populate document from [DOCUMENT: ...], and page/paragraph/table only from explicit source markers.
-12. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
-
-SUPPLEMENT AND LIST HANDLING (clarification to reduce missed tabulated items):
-- If the SOURCE MATERIAL indicates that component names are presented in tables, numbered lists, or labelled groups (for example "BoP components", "Stack components", "Table X - ... components" or similarly titled lists), explicitly parse those lists as inventory entries. This includes numbered or bullet lists in the main text, labelled groups inside figure/table captions, and machine-readable supplementary blocks provided alongside the paper.
-- For each listed component, create a foreground input flow attached to the appropriate process id in the LOCKED PROCESS STRUCTURE. If the locked structure distinguishes stack vs BoP subprocesses, attach to the specified subprocess; otherwise attach to the parent process. Preserve the component name exactly as printed.
-- If the supplementary material contains amounts or units corresponding to a listed component, extract and attach them. If no numeric amount/unit is present in any provided material, set amount=null and include an evidence snippet pointing to the source table/paragraph/figure.
-- Do not discard items because they appear only in supplementary text, figure captions, or transcribed visual evidence; they are valid sources for explicit component inventories.
-
-MANDATORY LIST EXTRACTION (added emphasis):
-- When numbered, bulleted, or table-form component lists appear anywhere in the provided source (main text, supplement, or transcribed visuals), you MUST extract every distinct listed item as a foreground input flow. Extract verbatim names and attach an evidence snippet for each occurrence. If the same exact component name appears in multiple places, you may merge into one flow but include all supporting evidence locations in the evidence text or warnings. It is better to include a listed component with amount=null than to omit it entirely.
+Protected extraction invariants:
+- explicit component lists are valid inventory evidence;
+- listed components remain foreground input flows, not background subprocesses;
+- it is better to retain an explicit listed inventory item with amount=null than to invent or omit a quantity.
 """
 
 
@@ -178,16 +175,13 @@ def transcribe_visual_evidence(
             if item is None:
                 warnings.append(f"No visual transcription returned for {asset.document}/{asset.asset_id}.")
                 continue
-            # surface any warnings from the visual stage
             warnings.extend(f"{asset.document}/{asset.asset_id}: {w}" for w in item.warnings)
-            # NOTE: include any non-empty transcriptions even if the vision model flagged them as not relevant.
-            # Previously we skipped items marked not relevant; that could drop legitimate tabulated component lists
-            # when the vision model mis-labelled relevance. To be conservative and recover explicit component
-            # inventories, include any non-empty evidence_text and log a warning when relevance is False.
             if not item.evidence_text.strip():
                 continue
             if not item.relevant_to_lca:
-                warnings.append(f"{asset.document}/{asset.asset_id}: visual evidence marked not relevant but included for LCA extraction")
+                warnings.append(
+                    f"{asset.document}/{asset.asset_id}: visual evidence marked not relevant but included for LCA extraction"
+                )
             blocks.append(
                 f"[VISUAL EVIDENCE: {asset.document} | {asset.asset_id} | {item.evidence_type}]\n"
                 f"Nearby context: {asset.context or 'None'}\n"
@@ -216,13 +210,16 @@ def identify_foreground_structure(
     api_key: str | None = None,
     extra_instructions: str = "",
 ) -> ForegroundStructure:
-    """First pass: identify the evidence-backed process hierarchy and study context."""
+    """Classify process-like source entities, then deterministically lock the foreground graph."""
     text = (text or "").strip()
     if not text:
         raise ValueError("No source text supplied")
 
     chosen_model = model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
-    user_prompt = "Identify the foreground process structure and study context from the source below.\n\n"
+    user_prompt = (
+        "Identify and classify process-like entities, study context, and source-supported reference products/units. "
+        "Do not directly decide downstream Brightway mappings.\n\n"
+    )
     if extra_instructions.strip():
         user_prompt += f"Study-specific instructions:\n{extra_instructions.strip()}\n\n"
     user_prompt += f"SOURCE MATERIAL:\n{text}"
@@ -233,16 +230,16 @@ def identify_foreground_structure(
             {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        response_format=ForegroundStructure,
+        response_format=ForegroundInterpretation,
     )
     message = completion.choices[0].message
     if getattr(message, "refusal", None):
         raise RuntimeError(f"Model refused structure extraction: {message.refusal}")
     if message.parsed is None:
-        raise RuntimeError("The model returned no parsed foreground structure")
-    if not message.parsed.processes:
-        raise RuntimeError("No evidence-backed foreground process was identified")
-    return message.parsed
+        raise RuntimeError("The model returned no parsed foreground interpretation")
+    if not message.parsed.candidates:
+        raise RuntimeError("No source-supported process-like candidate was identified")
+    return lock_foreground_interpretation(message.parsed)
 
 
 def extract_inventory_from_text(
@@ -251,8 +248,9 @@ def extract_inventory_from_text(
     model: str | None = None,
     api_key: str | None = None,
     extra_instructions: str = "",
+    source_mode: Literal["text", "documents"] = "text",
 ) -> InventoryExtraction:
-    """Two-pass, schema-first foreground extraction using OpenAI Structured Outputs."""
+    """Role-classified, two-pass foreground extraction using OpenAI Structured Outputs."""
     text = (text or "").strip()
     if not text:
         raise ValueError("No source text supplied")
@@ -266,7 +264,7 @@ def extract_inventory_from_text(
     )
 
     user_prompt = (
-        "Extract foreground flows using ONLY the process structure below. "
+        "Extract foreground flows using ONLY the locked process structure below. "
         "Do not add, split, merge, or rename processes.\n\n"
         f"LOCKED PROCESS STRUCTURE:\n{structure.model_dump_json(indent=2)}\n\n"
     )
@@ -288,15 +286,21 @@ def extract_inventory_from_text(
     if message.parsed is None:
         raise RuntimeError("The model returned no parsed foreground flows")
 
-    warnings = list(dict.fromkeys(structure.assumptions_or_warnings + message.parsed.assumptions_or_warnings))
+    warnings = list(
+        dict.fromkeys(
+            structure.assumptions_or_warnings + message.parsed.assumptions_or_warnings
+        )
+    )
     return InventoryExtraction(
         process_name=structure.process_name,
         functional_unit=structure.functional_unit,
         source_summary=structure.source_summary,
         study_context=structure.study_context,
         assumptions_or_warnings=warnings,
+        candidate_activities=structure.candidate_activities,
         processes=structure.processes,
         flows=message.parsed.flows,
+        provenance=build_extraction_provenance(model=chosen_model, source_mode=source_mode),
     )
 
 
@@ -308,7 +312,7 @@ def extract_inventory_from_documents(
     extra_instructions: str = "",
     max_visual_assets: int = 24,
 ) -> InventoryExtraction:
-    """Multimodal document path: native text + visual evidence -> existing two-pass LCA reasoning."""
+    """Multimodal path: native text + visual transcription -> role classification -> locked flows."""
     text, assets, ingestion_warnings = combine_document_evidence(
         documents,
         max_visual_assets=max_visual_assets,
@@ -324,6 +328,7 @@ def extract_inventory_from_documents(
         model=model,
         api_key=api_key,
         extra_instructions=extra_instructions,
+        source_mode="documents",
     )
     warnings = list(
         dict.fromkeys(
