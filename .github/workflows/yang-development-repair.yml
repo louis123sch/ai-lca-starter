@@ -1,115 +1,17 @@
-name: Yang development repair
+name: Yang development repair (paused)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/yang-development-repair.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
-  actions: write
-
-concurrency:
-  group: ai-lca-yang-development-repair
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  repair:
+  paused:
     runs-on: ubuntu-latest
-    timeout-minutes: 70
     steps:
-      - name: Check out main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 20
-
-      - name: Confirm diagnosed Yang head is still an ancestor
-        id: freshness
-        shell: bash
+      - name: Explain paused state
         run: |
-          git fetch origin main
-          CURRENT="$(git rev-parse origin/main)"
-          EXPECTED="4b2243a7bd38a9d3b92a1649c2916c4f1cdd8c00"
-          if git merge-base --is-ancestor "$EXPECTED" "$CURRENT"; then
-            echo "Diagnosed Yang head $EXPECTED is still in current main history ($CURRENT)."
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Diagnosed Yang head is no longer an ancestor of current main; stopping stale repair."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download failed Yang artifact
-        if: steps.freshness.outputs.run == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p repair_input
-          gh run download 31349687151 --repo "$GITHUB_REPOSITORY" --name "benchmark-003-31349687151" --dir repair_input
-
-      - name: Set up Python
-        if: steps.freshness.outputs.run == 'true'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install package
-        if: steps.freshness.outputs.run == 'true'
-        run: python -m pip install -e ".[test]"
-
-      - name: Ask repair agent for one conservative general change
-        if: steps.freshness.outputs.run == 'true'
-        id: repair
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_REPAIR_MODEL: gpt-5-mini
-        shell: bash
-        run: |
-          python -m ai_lca.repair_agent \
-            --benchmark-root repair_input \
-            --source benchmarks/yang_2024/source_excerpt.txt \
-            --result repair_result.json
-          CHANGED="$(python -c 'import json; print(str(json.load(open("repair_result.json"))["changed"]).lower())')"
-          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
-
-      - name: Run deterministic tests without secrets
-        if: steps.repair.outputs.changed == 'true'
-        env:
-          OPENAI_API_KEY: ""
-          GH_TOKEN: ""
-        run: python -m pytest -q
-
-      - name: Commit validated general repair
-        if: steps.repair.outputs.changed == 'true'
-        id: commit
-        shell: bash
-        run: |
-          git config user.name "ai-lca-benchmark-bot"
-          git config user.email "ai-lca-benchmark-bot@users.noreply.github.com"
-          git add src/ai_lca/llm.py
-          git commit -m "general repair: improve foreground activity discrimination"
-          git push origin HEAD:main
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for main and trigger regression pair
-        if: steps.commit.outputs.pushed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          HEAD_SHA="$(git rev-parse HEAD)"
-          for _ in $(seq 1 40); do
-            REMOTE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-            [ "$REMOTE_SHA" = "$HEAD_SHA" ] && break
-            sleep 3
-          done
-          gh workflow run gerloff-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
-          gh workflow run hermesmann-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
-
-      - name: Record no-change diagnosis
-        if: steps.freshness.outputs.run == 'true' && steps.repair.outputs.changed != 'true'
-        run: cat repair_result.json
+          echo "Yang-specific automatic repair is intentionally paused."
+          echo "Yang remains development/regression evidence, but v0.4 should not be repeatedly tuned against it."
+          echo "Use the general process-role architecture and V1_VALIDATION_PLAN.md for further development."

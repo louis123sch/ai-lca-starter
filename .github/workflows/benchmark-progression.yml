@@ -1,91 +1,17 @@
-name: Benchmark progression
+name: Benchmark progression (paused)
 
 on:
-  workflow_run:
-    workflows:
-      - "Gerloff unseen validation benchmark"
-      - "Hermesmann regression benchmark"
-      - "Benchmark 003"
-      - "Benchmark 004"
-      - "Benchmark 005"
-      - "Benchmark 006"
-    types: [completed]
+  workflow_dispatch:
 
 permissions:
-  actions: write
   contents: read
 
-concurrency:
-  group: ai-lca-benchmark-progression
-  cancel-in-progress: false
-
 jobs:
-  advance:
-    if: github.event.workflow_run.conclusion == 'success'
+  paused:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Advance development queue conservatively
-        env:
-          GH_TOKEN: ${{ github.token }}
-          COMPLETED_NAME: ${{ github.event.workflow_run.name }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-        shell: bash
+      - name: Explain paused state
         run: |
-          set -euo pipefail
-
-          fetch_runs() {
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100"
-          }
-
-          run_exists_for_head() {
-            local name="$1"
-            fetch_runs | jq -e --arg NAME "$name" 'any(.workflow_runs[]; .name == $NAME)' >/dev/null
-          }
-
-          successful_for_head() {
-            local name="$1"
-            fetch_runs | jq -e --arg NAME "$name" 'any(.workflow_runs[]; .name == $NAME and .status == "completed" and .conclusion == "success")' >/dev/null
-          }
-
-          dispatch_if_available_and_not_run() {
-            local workflow_file="$1"
-            local workflow_name="$2"
-            if [ ! -f ".github/workflows/$workflow_file" ]; then
-              echo "$workflow_file is not staged yet; stopping progression without error."
-              return 0
-            fi
-            if run_exists_for_head "$workflow_name"; then
-              echo "$workflow_name already has a run for $HEAD_SHA; not dispatching a duplicate."
-              return 0
-            fi
-            echo "Dispatching $workflow_name for $HEAD_SHA"
-            gh workflow run "$workflow_file" --repo "$GITHUB_REPOSITORY" --ref main
-          }
-
-          case "$COMPLETED_NAME" in
-            "Gerloff unseen validation benchmark"|"Hermesmann regression benchmark")
-              if successful_for_head "Gerloff unseen validation benchmark" && \
-                 successful_for_head "Hermesmann regression benchmark"; then
-                dispatch_if_available_and_not_run "benchmark-003.yml" "Benchmark 003"
-              else
-                echo "Baseline regression pair is not both successful on $HEAD_SHA; holding queue."
-              fi
-              ;;
-            "Benchmark 003")
-              dispatch_if_available_and_not_run "benchmark-004.yml" "Benchmark 004"
-              ;;
-            "Benchmark 004")
-              echo "Benchmark 004 owns the freeze transition. If it passes, it dispatches Benchmark 005 with the exact frozen extractor SHA."
-              ;;
-            "Benchmark 005")
-              echo "Benchmark 005 is a holdout. Its workflow, not this controller, dispatches Benchmark 006 on the identical frozen SHA even if the 005 quality gate fails."
-              ;;
-            "Benchmark 006")
-              echo "Final frozen holdout completed; no automatic repair or further progression is permitted from this result."
-              ;;
-          esac
+          echo "Automatic 001-006 benchmark progression is intentionally paused for the v0.4/v1 product-validation phase."
+          echo "Existing historical runs remain evidence. Use V1_VALIDATION_PLAN.md for the next blind-validation stage."
+          echo "Do not restart repeated tuning against the legacy benchmark suite from this workflow."

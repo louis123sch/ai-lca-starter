@@ -26,12 +26,11 @@ BANNED_ADDED_FRAGMENTS = (
     "gh_token",
 )
 
-# These are general extraction invariants already enforced by deterministic tests.
-# Automatic prompt repair may strengthen them, but must not silently remove them.
+# General extraction invariants protected from any future automated prompt repair.
 REQUIRED_PROMPT_INVARIANTS = (
     "explicit component lists",
     "foreground input flow",
-    "do not reclassify such tabulated components as background subprocesses",
+    "listed components remain foreground input flows, not background subprocesses",
 )
 
 
@@ -95,7 +94,7 @@ def propose_repair(
     protected = "\n".join(f"- {item}" for item in REQUIRED_PROMPT_INVARIANTS)
     prompt = f"""A paper-grounded AI-LCA extraction benchmark failed.
 
-You may make at most ONE narrow, generalisable change to src/ai_lca/llm.py. Do not hard-code this paper, process names, quantities, benchmark thresholds, expected values, or aliases. Do not modify the gold standard. Preserve the architecture: source evidence -> process structure -> locked flow extraction -> human review -> Brightway matching. Preserve anti-hallucination, foreground/background separation, and anti-over-decomposition constraints.
+You may make at most ONE narrow, generalisable change to src/ai_lca/llm.py. Do not hard-code this paper, process names, quantities, benchmark thresholds, expected values, or aliases. Do not modify the gold standard. Preserve the architecture: source evidence -> process-role classification -> deterministic foreground locking -> locked flow extraction -> human review -> Brightway matching. Preserve anti-hallucination, foreground/background separation, and anti-over-decomposition constraints.
 
 Prefer a prompt/reasoning improvement that would make sense for unseen LCA papers. If the failure is fundamentally document ingestion rather than LCA reasoning, set should_change=false; ingestion code must be fixed by a human-reviewed code change instead of pretending a prompt can see missing source evidence.
 
