@@ -33,6 +33,33 @@ def test_merge_treats_parenthetical_counts_as_same_identity():
     assert len(merged) == 1
 
 
+def test_merge_excludes_explicit_calculation_factors_not_inventory_exchanges():
+    merged = merge_supported_flows(
+        [flow("steel frame", amount=100, unit="kg")],
+        [flow("steel manufacturing (additional manufacturing energy factor)", amount=5.3, unit="kWh/kg")],
+    )
+    assert [x.name for x in merged] == ["steel frame"]
+
+
+def test_merge_excludes_lifetime_normalisation_totals_not_inventory_exchanges():
+    merged = merge_supported_flows(
+        [flow("electricity", amount=50, unit="kWh")],
+        [flow("Produced amount of hydrogen in 20 years", amount=3_000_000, unit="kg")],
+    )
+    assert [x.name for x in merged] == ["electricity"]
+
+
+def test_merge_excludes_explicit_dash_absence_but_keeps_unquantified_component():
+    merged = merge_supported_flows(
+        [],
+        [
+            flow("heat", amount=None, unit="kWh", evidence="Heat (kWh) = -"),
+            flow("heat exchanger", amount=None, unit=None, evidence="BoP components: 9 Heat exchanger"),
+        ],
+    )
+    assert [x.name for x in merged] == ["heat exchanger"]
+
+
 def test_inventory_dense_detection_requires_list_or_table_structure():
     assert _looks_inventory_dense("Table 2\nMaterial | Amount | Unit\nsteel | 2 | kg")
     assert _looks_inventory_dense("BoP components:\n1 Pump\n2 Tank\n3 Heat exchanger")
