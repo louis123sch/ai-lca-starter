@@ -23,7 +23,11 @@ from ai_lca.export import (
 )
 from ai_lca.geography import ecoinvent_location_hints
 from ai_lca.llm import extract_inventory_from_documents, extract_inventory_from_text
-from ai_lca.review import apply_process_review
+from ai_lca.review import (
+    apply_process_review,
+    process_review_id_map,
+    remap_inventory_dataframe,
+)
 from ai_lca.runtime import extractor_version, git_sha
 
 load_dotenv()
@@ -139,10 +143,12 @@ if st.button("1. Interpret paper and extract foreground", type="primary", disabl
                     model=model,
                     extra_instructions=extra_instructions,
                 )
+        original_inventory_df = extraction_to_dataframe(extraction)
         st.session_state["original_extraction"] = extraction
         st.session_state["extraction"] = extraction
         st.session_state["process_review_df"] = process_structure_to_dataframe(extraction)
-        st.session_state["inventory_df"] = extraction_to_dataframe(extraction)
+        st.session_state["original_inventory_df"] = original_inventory_df.copy()
+        st.session_state["inventory_df"] = original_inventory_df.copy()
         st.session_state.pop("candidates", None)
         st.session_state.pop("mapping_df", None)
     except Exception as exc:
@@ -218,17 +224,33 @@ if "extraction" in st.session_state:
 
     if st.button("Apply process review"):
         try:
+            original_extraction = st.session_state["original_extraction"]
             reviewed_extraction = apply_process_review(
-                st.session_state["original_extraction"],
+                original_extraction,
                 reviewed_process_df,
             )
             if not reviewed_extraction.processes:
                 raise ValueError("At least one foreground process must remain after review.")
+            id_map = process_review_id_map(original_extraction, reviewed_process_df)
+            process_names = {
+                process.process_id: process.name for process in reviewed_extraction.processes
+            }
+            original_inventory_df = st.session_state.get(
+                "original_inventory_df",
+                extraction_to_dataframe(original_extraction),
+            )
+            reviewed_inventory_df = remap_inventory_dataframe(
+                original_inventory_df,
+                process_id_map=id_map,
+                process_names=process_names,
+            )
             st.session_state["extraction"] = reviewed_extraction
-            st.session_state["inventory_df"] = extraction_to_dataframe(reviewed_extraction)
+            st.session_state["inventory_df"] = reviewed_inventory_df
             st.session_state.pop("candidates", None)
             st.session_state.pop("mapping_df", None)
-            st.success("Process review applied. Flow assignments were updated deterministically.")
+            st.success(
+                "Process review applied. Source flow IDs and evidence were preserved while process assignments were updated."
+            )
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
