@@ -29,7 +29,7 @@ jobs:
         with:
           ref: main
 
-      - name: Advance benchmark queue conservatively
+      - name: Advance development queue conservatively
         env:
           GH_TOKEN: ${{ github.token }}
           COMPLETED_NAME: ${{ github.event.workflow_run.name }}
@@ -80,12 +80,12 @@ jobs:
               dispatch_if_available_and_not_run "benchmark-004.yml" "Benchmark 004"
               ;;
             "Benchmark 004")
-              dispatch_if_available_and_not_run "benchmark-005.yml" "Benchmark 005"
+              echo "Benchmark 004 owns the freeze transition. If it passes, it dispatches Benchmark 005 with the exact frozen extractor SHA."
               ;;
             "Benchmark 005")
-              dispatch_if_available_and_not_run "benchmark-006.yml" "Benchmark 006"
+              echo "Benchmark 005 is a holdout. Its workflow, not this controller, dispatches Benchmark 006 on the identical frozen SHA even if the 005 quality gate fails."
               ;;
             "Benchmark 006")
-              echo "Benchmark queue through 006 is complete."
+              echo "Final frozen holdout completed; no automatic repair or further progression is permitted from this result."
               ;;
           esac
