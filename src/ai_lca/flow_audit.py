@@ -21,6 +21,7 @@ Rules:
 8. Every returned flow must include a short evidence_text copied from the supplied source material that directly supports that item.
 9. linked_process_id is only for an explicit exchange between two already locked foreground process IDs; otherwise null.
 10. Precision is more important than speculative completion: if it is unclear whether an item is modeled foreground inventory, omit it and record the ambiguity as a warning.
+11. A broad component, assembly, stack/BoP group, or equipment heading does NOT represent distinct explicit material or subcomponent inventory rows listed beneath or alongside it. When the source gives both a higher-level component label and separate modeled material/subcomponent rows, audit the separate rows individually and return any that are missing. Do not stop at the higher-level label merely because it is already present in the initial extraction.
 """
 
 
