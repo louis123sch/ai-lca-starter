@@ -1,10 +1,40 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pandas as pd
 
 from .models import InventoryExtraction
+
+
+_REVIEWED_FIELDS = (
+    "include",
+    "process_id",
+    "name",
+    "amount",
+    "unit",
+    "direction",
+    "linked_process_id",
+    "component_or_stage",
+    "basis",
+    "notes",
+)
+
+
+def _comparable(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if isinstance(value, str):
+        return value.strip()
+    return value
 
 
 def ensure_flow_ids(df: pd.DataFrame) -> pd.DataFrame:
@@ -46,6 +76,7 @@ def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
             {
                 "include": True,
                 "flow_id": i,
+                "review_status": "ai_proposed",
                 "process_id": flow.process_id,
                 "process_name": process_names.get(flow.process_id, ""),
                 "name": flow.name,
@@ -64,6 +95,49 @@ def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def normalize_inventory_review(
+    df: pd.DataFrame,
+    *,
+    extraction: InventoryExtraction,
+    original_extraction: InventoryExtraction,
+) -> pd.DataFrame:
+    """Normalize editor rows and label source-derived, human-edited and user-added flows.
+
+    Source evidence columns are never used to determine edit status and should be
+    read-only in the UI. This records edits without overwriting the original AI/source
+    extraction preserved separately in the review bundle.
+    """
+    result = ensure_flow_ids(df)
+    process_names = {p.process_id: p.name for p in extraction.processes}
+    if "process_name" not in result.columns:
+        result["process_name"] = ""
+    result["process_name"] = [
+        process_names.get(str(pid).strip(), "") if _comparable(pid) is not None else ""
+        for pid in result.get("process_id", pd.Series([None] * len(result))).tolist()
+    ]
+
+    original_df = extraction_to_dataframe(original_extraction)
+    original_rows = {
+        int(row["flow_id"]): row
+        for _, row in original_df.iterrows()
+    }
+
+    statuses: list[str] = []
+    for _, row in result.iterrows():
+        flow_id = int(row["flow_id"])
+        original = original_rows.get(flow_id)
+        if original is None:
+            statuses.append("user_added")
+            continue
+        changed = any(
+            _comparable(row.get(field)) != _comparable(original.get(field))
+            for field in _REVIEWED_FIELDS
+        )
+        statuses.append("human_edited" if changed else "ai_proposed")
+    result["review_status"] = statuses
+    return result
 
 
 def process_structure_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
