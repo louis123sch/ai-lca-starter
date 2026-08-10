@@ -1,0 +1,35 @@
+name: Resume development gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/resume-development-gate.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify validated repair gate and resume Yang
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: 61c20b94c954dac783cb49bd4aa389471beb7f12
+          TARGET_REF: benchmark-repair-61c20
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNS="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&per_page=100")"
+          echo "$RUNS" | jq -e 'any(.workflow_runs[]; .name == "Gerloff unseen validation benchmark" and .status == "completed" and .conclusion == "success")' >/dev/null
+          echo "$RUNS" | jq -e 'any(.workflow_runs[]; .name == "Hermesmann regression benchmark" and .status == "completed" and .conclusion == "success")' >/dev/null
+          if echo "$RUNS" | jq -e 'any(.workflow_runs[]; .name == "Benchmark 003")' >/dev/null; then
+            echo "Benchmark 003 already exists for validated repair SHA; nothing to do."
+            exit 0
+          fi
+          REF_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$TARGET_REF" --jq .object.sha)"
+          test "$REF_SHA" = "$TARGET_SHA"
+          echo "Regression pair is green on $TARGET_SHA; dispatching Benchmark 003 on the exact validated extractor SHA."
+          gh workflow run benchmark-003.yml --repo "$GITHUB_REPOSITORY" --ref "$TARGET_REF" -f runs=3
