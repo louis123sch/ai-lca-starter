@@ -6,6 +6,7 @@ on:
     paths:
       - "src/ai_lca/jats.py"
       - "src/ai_lca/autonomous_literature.py"
+      - "src/ai_lca/llm.py"
       - "tests/test_jats.py"
       - "tests/test_autonomous_literature.py"
       - ".github/workflows/literature-autonomous.yml"
@@ -13,11 +14,12 @@ on:
 
 concurrency:
   group: phase1-autonomous-literature
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   one-paper-validation:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       actions: write
@@ -26,6 +28,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: gpt-5-mini
       OPENAI_SCREEN_MODEL: gpt-5-nano
+      OPENAI_REQUEST_TIMEOUT_SECONDS: "180"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
