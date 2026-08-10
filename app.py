@@ -278,9 +278,9 @@ if "extraction" in st.session_state:
         )
     with dl3:
         st.download_button(
-            "Download extraction audit JSON",
-            extraction.model_dump_json(indent=2),
-            file_name="ai_lca_extraction_audit.json",
+            "Download original AI extraction JSON",
+            st.session_state["original_extraction"].model_dump_json(indent=2),
+            file_name="ai_lca_original_extraction.json",
             mime="application/json",
         )
 
@@ -453,7 +453,12 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
 
     st.download_button(
         "Download reproducible review bundle",
-        review_bundle_to_json(extraction, inv_df, mapping_df),
+        review_bundle_to_json(
+            extraction,
+            inv_df,
+            mapping_df,
+            original_extraction=st.session_state["original_extraction"],
+        ),
         file_name="ai_lca_review_bundle.json",
         mime="application/json",
     )
