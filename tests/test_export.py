@@ -2,7 +2,7 @@ import json
 
 import pandas as pd
 
-from ai_lca.export import review_bundle_to_json
+from ai_lca.export import ensure_flow_ids, review_bundle_to_json
 from ai_lca.models import ForegroundProcess, InventoryExtraction
 
 
@@ -39,3 +39,19 @@ def test_review_bundle_preserves_original_ai_proposal_and_reviewed_state():
     assert payload["original_ai_extraction"]["processes"][0]["name"] == "Original process"
     assert [p["process_id"] for p in payload["reviewed_extraction"]["processes"]] == ["p1"]
     assert payload["reviewed_extraction"]["processes"][0]["name"] == "Human-reviewed process"
+
+
+def test_ensure_flow_ids_fills_missing_and_duplicate_editor_ids():
+    df = pd.DataFrame(
+        [
+            {"flow_id": 0, "name": "existing"},
+            {"flow_id": 0, "name": "duplicate"},
+            {"flow_id": None, "name": "human-added"},
+            {"flow_id": 7, "name": "existing-seven"},
+        ]
+    )
+
+    result = ensure_flow_ids(df)
+
+    assert result["flow_id"].tolist() == [0, 1, 2, 7]
+    assert len(set(result["flow_id"])) == len(result)
