@@ -1,0 +1,114 @@
+name: Yang development repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/yang-development-repair.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: ai-lca-yang-development-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 12
+
+      - name: Confirm expected failed head is still current
+        id: freshness
+        shell: bash
+        run: |
+          git fetch origin main
+          CURRENT="$(git rev-parse origin/main)"
+          EXPECTED="4b2243a7bd38a9d3b92a1649c2916c4f1cdd8c00"
+          if [ "$CURRENT" != "$EXPECTED" ]; then
+            echo "Current main $CURRENT differs from the diagnosed Yang head $EXPECTED; stopping to avoid stale repair."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download failed Yang artifact
+        if: steps.freshness.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p repair_input
+          gh run download 31349687151 --repo "$GITHUB_REPOSITORY" --name "benchmark-003-31349687151" --dir repair_input
+
+      - name: Set up Python
+        if: steps.freshness.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        if: steps.freshness.outputs.run == 'true'
+        run: python -m pip install -e ".[test]"
+
+      - name: Ask repair agent for one conservative general change
+        if: steps.freshness.outputs.run == 'true'
+        id: repair
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_REPAIR_MODEL: gpt-5-mini
+        shell: bash
+        run: |
+          python -m ai_lca.repair_agent \
+            --benchmark-root repair_input \
+            --source benchmarks/yang_2024/source_excerpt.txt \
+            --result repair_result.json
+          CHANGED="$(python -c 'import json; print(str(json.load(open("repair_result.json"))["changed"]).lower())')"
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Run deterministic tests without secrets
+        if: steps.repair.outputs.changed == 'true'
+        env:
+          OPENAI_API_KEY: ""
+          GH_TOKEN: ""
+        run: python -m pytest -q
+
+      - name: Commit validated general repair
+        if: steps.repair.outputs.changed == 'true'
+        id: commit
+        shell: bash
+        run: |
+          git config user.name "ai-lca-benchmark-bot"
+          git config user.email "ai-lca-benchmark-bot@users.noreply.github.com"
+          git add src/ai_lca/llm.py
+          git commit -m "general repair: improve foreground activity discrimination"
+          git push origin HEAD:main
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for main and trigger regression pair
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          for _ in $(seq 1 40); do
+            REMOTE_SHA="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+            [ "$REMOTE_SHA" = "$HEAD_SHA" ] && break
+            sleep 3
+          done
+          gh workflow run gerloff-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
+          gh workflow run hermesmann-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
+
+      - name: Record no-change diagnosis
+        if: steps.freshness.outputs.run == 'true' && steps.repair.outputs.changed != 'true'
+        run: cat repair_result.json
