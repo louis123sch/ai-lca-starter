@@ -16,8 +16,8 @@ from ai_lca.documents import combine_document_evidence
 from ai_lca.export import (
     candidate_structure_to_dataframe,
     dataframe_to_json,
-    ensure_flow_ids,
     extraction_to_dataframe,
+    normalize_inventory_review,
     process_structure_to_dataframe,
     review_bundle_to_json,
 )
@@ -245,6 +245,7 @@ if "extraction" in st.session_state:
                 st.write(f"• {warning}")
 
     st.subheader("Review foreground inventory")
+    current_process_ids = [p.process_id for p in extraction.processes]
     edited_df = st.data_editor(
         st.session_state["inventory_df"],
         width="stretch",
@@ -253,15 +254,34 @@ if "extraction" in st.session_state:
         column_config={
             "include": st.column_config.CheckboxColumn("Include"),
             "flow_id": st.column_config.NumberColumn("Flow ID", disabled=True),
-            "process_id": st.column_config.TextColumn("Process ID", disabled=True),
+            "review_status": st.column_config.TextColumn("Review status", disabled=True),
+            "process_id": st.column_config.SelectboxColumn("Process ID", options=current_process_ids),
             "process_name": st.column_config.TextColumn("Process", disabled=True),
-            "linked_process_id": st.column_config.TextColumn("Linked foreground process", disabled=True),
-            "evidence_text": st.column_config.TextColumn("Evidence", width="large"),
+            "direction": st.column_config.SelectboxColumn(
+                "Direction", options=["input", "output", "emission", "unknown"]
+            ),
+            "linked_process_id": st.column_config.SelectboxColumn(
+                "Linked foreground process",
+                options=[""] + current_process_ids,
+                help="Use only for a reviewed explicit foreground-to-foreground input link.",
+            ),
+            "document": st.column_config.TextColumn("Document", disabled=True),
+            "page": st.column_config.NumberColumn("Page", disabled=True),
+            "paragraph": st.column_config.NumberColumn("Paragraph", disabled=True),
+            "table": st.column_config.TextColumn("Table", disabled=True),
+            "evidence_text": st.column_config.TextColumn("Source evidence", disabled=True, width="large"),
         },
         key="inventory_editor",
     )
-    edited_df = ensure_flow_ids(edited_df)
+    edited_df = normalize_inventory_review(
+        edited_df,
+        extraction=extraction,
+        original_extraction=st.session_state["original_extraction"],
+    )
     st.session_state["inventory_df"] = edited_df
+    st.caption(
+        "Source evidence is read-only. Rows are labelled AI proposed, human edited, or user added; the untouched AI extraction is preserved separately."
+    )
 
     dl1, dl2, dl3 = st.columns(3)
     with dl1:
