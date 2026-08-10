@@ -6,6 +6,7 @@ import os
 import statistics
 from pathlib import Path
 
+from .audited_extraction import extract_inventory_from_documents_audited
 from .benchmark import (
     BENCHMARK_EXTRA_INSTRUCTIONS,
     evaluate_extraction,
@@ -13,7 +14,6 @@ from .benchmark import (
     load_expected,
     report_to_dict,
 )
-from .llm import extract_inventory_from_documents
 
 
 def run_multimodal_benchmark(
@@ -25,7 +25,7 @@ def run_multimodal_benchmark(
     output_dir: Path,
     max_visual_assets: int = 24,
 ):
-    """Run the benchmark through the same multimodal document path used by the app."""
+    """Run the benchmark through the audited multimodal document path."""
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not set. Configure it before running the live benchmark.")
 
@@ -35,7 +35,7 @@ def run_multimodal_benchmark(
     reports = []
 
     for n in range(1, runs + 1):
-        extraction = extract_inventory_from_documents(
+        extraction = extract_inventory_from_documents_audited(
             documents,
             model=model,
             extra_instructions=BENCHMARK_EXTRA_INSTRUCTIONS,
