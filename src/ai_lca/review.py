@@ -11,15 +11,16 @@ def _clean_text(value) -> str:
     return str(value).strip()
 
 
-def apply_process_review(
+def _resolve_process_review(
     extraction: InventoryExtraction,
     review_df: pd.DataFrame,
-) -> InventoryExtraction:
-    """Apply merge/remove/rename/re-parent edits without losing the original evidence trail.
-
-    Process IDs are stable. A merge reattaches source-supported flows to the retained
-    target process. Removing a process without a merge removes its attached flows.
-    """
+) -> tuple[
+    dict[str, pd.Series],
+    dict[str, str | None],
+    dict[str, str],
+    set[str],
+    list[str],
+]:
     original = {process.process_id: process for process in extraction.processes}
     rows = {
         _clean_text(row.get("process_id")): row
@@ -31,7 +32,7 @@ def apply_process_review(
     merge_requests: dict[str, str] = {}
     warnings = list(extraction.assumptions_or_warnings)
 
-    for process_id, process in original.items():
+    for process_id in original:
         row = rows.get(process_id)
         if row is None:
             retained_ids.add(process_id)
@@ -73,6 +74,62 @@ def apply_process_review(
             process_id_map[process_id] = process_id
         else:
             process_id_map[process_id] = None
+
+    return rows, process_id_map, valid_merges, retained_ids, warnings
+
+
+def process_review_id_map(
+    extraction: InventoryExtraction,
+    review_df: pd.DataFrame,
+) -> dict[str, str | None]:
+    """Return the deterministic original-process -> reviewed-process mapping."""
+    _, process_id_map, _, _, _ = _resolve_process_review(extraction, review_df)
+    return process_id_map
+
+
+def remap_inventory_dataframe(
+    inventory_df: pd.DataFrame,
+    *,
+    process_id_map: dict[str, str | None],
+    process_names: dict[str, str],
+) -> pd.DataFrame:
+    """Remap process references while preserving existing stable flow IDs and evidence rows."""
+    result = inventory_df.copy()
+    kept_rows = []
+    for _, row in result.iterrows():
+        source_process = _clean_text(row.get("process_id"))
+        mapped_process = process_id_map.get(source_process, source_process)
+        if mapped_process is None:
+            continue
+        row = row.copy()
+        row["process_id"] = mapped_process
+        row["process_name"] = process_names.get(mapped_process, "")
+
+        linked = _clean_text(row.get("linked_process_id"))
+        if linked:
+            mapped_link = process_id_map.get(linked, linked)
+            row["linked_process_id"] = mapped_link or ""
+        kept_rows.append(row)
+
+    if not kept_rows:
+        return result.iloc[0:0].copy()
+    return pd.DataFrame(kept_rows).reset_index(drop=True)
+
+
+def apply_process_review(
+    extraction: InventoryExtraction,
+    review_df: pd.DataFrame,
+) -> InventoryExtraction:
+    """Apply merge/remove/rename/re-parent edits without losing the original evidence trail.
+
+    Process IDs are stable. A merge reattaches source-supported flows to the retained
+    target process. Removing a process without a merge removes its attached flows.
+    """
+    original = {process.process_id: process for process in extraction.processes}
+    rows, process_id_map, valid_merges, retained_ids, warnings = _resolve_process_review(
+        extraction,
+        review_df,
+    )
 
     reviewed_processes: list[ForegroundProcess] = []
     for process_id, process in original.items():
