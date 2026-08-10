@@ -28,6 +28,7 @@ Rules:
 8. If the chunk contains no explicit modeled inventory list/table rows, return an empty flow list.
 9. Do not emit both an intermediate calculation/plant-total row and its explicitly reported final functional-unit-normalised row as separate flows when the source makes clear they represent the same inventory contribution. Prefer the final modeled basis; retain both only when the source explicitly models them as distinct exchanges.
 10. Column-unit suffixes, row numbers, counts, or explanatory qualifiers are source evidence, not reasons to duplicate an inventory item already recovered from the same process and direction.
+11. Calculation coefficients, conversion factors, lifetime production totals used only for normalisation, and cells explicitly marked as absent (for example '-') are not inventory exchanges. Do not emit them as flows unless the source explicitly models them as an exchange.
 """
 
 
@@ -72,6 +73,33 @@ def _manufacturing_energy_identity(flow: InventoryFlow) -> str | None:
     return None
 
 
+def _is_non_exchange_calculation_metadata(flow: InventoryFlow) -> bool:
+    """Reject rows that explicitly describe calculation metadata rather than LCI exchanges.
+
+    This is deliberately narrow: source-backed unquantified components remain valid flows.
+    Only explicit factor/normalisation/absence signals are excluded.
+    """
+    name = (flow.name or "").casefold().strip()
+    evidence = (flow.evidence.evidence_text or "").casefold().strip()
+
+    if "additional manufacturing energy factor" in name:
+        return True
+
+    if re.search(r"\bproduced amount of\b.*\b(?:in|over)\s+\d+(?:\.\d+)?\s*years?\b", name):
+        return True
+
+    if flow.amount is None:
+        explicit_absence = (
+            re.search(r"=\s*-\s*(?:\)|$)", evidence)
+            or re.search(r"\|\s*-\s*(?:\||$)", evidence)
+            or re.search(r"\t-\s*(?:\t|$)", evidence)
+        )
+        if explicit_absence:
+            return True
+
+    return False
+
+
 def _flow_identity(flow: InventoryFlow) -> tuple[str, str, str]:
     semantic = _manufacturing_energy_identity(flow)
     return flow.process_id.casefold().strip(), semantic or _normalise_name(flow.name), flow.direction
@@ -94,6 +122,8 @@ def merge_supported_flows(primary: Iterable[InventoryFlow], recovered: Iterable[
     merged: list[InventoryFlow] = []
     positions: dict[tuple[str, str, str], int] = {}
     for flow in [*primary, *recovered]:
+        if _is_non_exchange_calculation_metadata(flow):
+            continue
         key = _flow_identity(flow)
         index = positions.get(key)
         if index is None:
