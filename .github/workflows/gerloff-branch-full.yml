@@ -2,6 +2,7 @@ name: Gerloff branch full benchmark
 
 # Branch-only harness: touching this file intentionally triggers a full benchmark
 # after the fast Gerloff gates have been verified stable.
+# Trigger after calculation-metadata fast-gate pass.
 on:
   push:
     branches: [feat/gerloff-fast-visual-regression]
