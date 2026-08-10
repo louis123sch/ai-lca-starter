@@ -1,0 +1,45 @@
+name: Phase 1 literature-scale smoke
+
+on:
+  push:
+    branches: [phase1-literature-scale]
+    paths:
+      - "src/ai_lca/literature.py"
+      - "tests/test_literature.py"
+      - ".github/workflows/literature-scale-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  test-and-discover:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package
+        run: python -m pip install -e ".[test]"
+      - name: Run literature tests
+        run: python -m pytest -q tests/test_literature.py
+      - name: Discover 25 IJLCA records without PDFs
+        run: >-
+          python -m ai_lca.literature
+          --max-records 25
+          --output-dir literature_runs/smoke
+      - name: Show discovery summary
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          p = Path("literature_runs/smoke/catalogue.csv")
+          rows = list(csv.DictReader(p.open()))
+          print(f"records={len(rows)}")
+          print(f"with_abstract={sum(bool(r['abstract']) for r in rows)}")
+          print(f"with_tdm_links={sum(bool(r['tdm_links']) for r in rows)}")
+          print("top_candidates=")
+          for row in sorted(rows, key=lambda r: int(r['relevance_score']), reverse=True)[:10]:
+              print(row['relevance_score'], row['doi'], row['title'])
+          PY
