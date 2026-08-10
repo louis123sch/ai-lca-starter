@@ -16,6 +16,7 @@ from ai_lca.documents import combine_document_evidence
 from ai_lca.export import (
     candidate_structure_to_dataframe,
     dataframe_to_json,
+    ensure_flow_ids,
     extraction_to_dataframe,
     process_structure_to_dataframe,
     review_bundle_to_json,
@@ -259,6 +260,7 @@ if "extraction" in st.session_state:
         },
         key="inventory_editor",
     )
+    edited_df = ensure_flow_ids(edited_df)
     st.session_state["inventory_df"] = edited_df
 
     dl1, dl2, dl3 = st.columns(3)
