@@ -2,7 +2,7 @@ name: Gerloff unseen validation benchmark
 
 on:
   push:
-    branches: [main]
+    branches: [main, gerloff-recall-stability]
     paths:
       - "src/**"
       - "tests/**"
@@ -86,7 +86,11 @@ jobs:
         run: |
           RUNS="${{ github.event.inputs.runs }}"
           if [ -z "$RUNS" ]; then
-            RUNS=3
+            if [ "${{ github.ref_name }}" = "gerloff-recall-stability" ]; then
+              RUNS=1
+            else
+              RUNS=3
+            fi
           fi
           echo "Running $RUNS independent multimodal extractions"
           bash scripts/run_resilient_benchmark.sh \
