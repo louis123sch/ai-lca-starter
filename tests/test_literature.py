@@ -1,4 +1,7 @@
+from urllib.parse import parse_qs, urlparse
+
 from ai_lca.literature import LiteratureRecord, record_from_crossref, rough_lca_relevance
+from ai_lca.literature_acquire import springer_query_url
 
 
 def test_record_from_crossref_normalizes_metadata():
@@ -48,3 +51,13 @@ def test_relevance_downranks_corrections():
         tdm_links=(),
     )
     assert rough_lca_relevance(research) > rough_lca_relevance(correction)
+
+
+def test_springer_oa_and_tdm_urls_are_doi_scoped():
+    doi = "10.1007/s11367-026-01234-5"
+    oa = urlparse(springer_query_url(doi, "secret", tdm=False))
+    tdm = urlparse(springer_query_url(doi, "secret", tdm=True))
+    assert oa.path == "/openaccess/jats"
+    assert tdm.path == "/xmldata/jats"
+    assert parse_qs(oa.query)["q"] == [f"doi:{doi}"]
+    assert parse_qs(tdm.query)["q"] == [f"doi:{doi}"]
