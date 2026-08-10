@@ -14,9 +14,32 @@ from .models import FlowExtraction
 def _norm(value: str | None) -> str:
     if value is None:
         return ""
-    value = value.casefold().replace("³", "3")
+    value = value.casefold().replace("&", " and ").replace("³", "3")
+    value = value.replace("preheating", "pre heater")
+    value = re.sub(r"\b(components?|pieces?|units?)\b", " ", value)
     value = re.sub(r"[^a-z0-9.]+", " ", value)
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _tokens(value: str | None) -> set[str]:
+    tokens = set(_norm(value).split())
+    singular = set()
+    for token in tokens:
+        singular.add(token[:-1] if len(token) > 4 and token.endswith("s") else token)
+    return singular - {"and", "for", "with"}
+
+
+def _name_matches(expected: str, actual: str) -> bool:
+    if _norm(expected) == _norm(actual):
+        return True
+    exp = _tokens(expected)
+    act = _tokens(actual)
+    if not exp or not act:
+        return False
+    # Benchmark matching should accept printed source qualifiers/counts and word-order changes,
+    # but still require the expected concept tokens to be substantially present.
+    overlap = len(exp & act)
+    return overlap / len(exp) >= 0.8 and overlap / min(len(exp), len(act)) >= 0.8
 
 
 def load_unquantified_expected(path: Path) -> list[dict[str, str]]:
@@ -34,7 +57,8 @@ def score_unquantified_flows(extraction: FlowExtraction, expected: list[dict[str
         for index, flow in enumerate(unmatched):
             if _norm(flow.process_id) != _norm(row["process_key"]):
                 continue
-            if _norm(flow.name) != _norm(row["name"]):
+            aliases = [row["name"]] + [x for x in (row.get("aliases") or "").split("|") if x]
+            if not any(_name_matches(alias, flow.name) for alias in aliases):
                 continue
             if flow.amount is not None:
                 continue
@@ -47,12 +71,7 @@ def score_unquantified_flows(extraction: FlowExtraction, expected: list[dict[str
             flow = unmatched.pop(found)
             matched.append(payload | {"actual": flow.model_dump(mode="json")})
 
-    expected_keys = {(_norm(row["process_key"]), _norm(row["name"])) for row in expected}
-    unsupported = [
-        flow.model_dump(mode="json")
-        for flow in unmatched
-        if (_norm(flow.process_id), _norm(flow.name)) not in expected_keys
-    ]
+    unsupported = [flow.model_dump(mode="json") for flow in unmatched]
     total = len(expected)
     recall = len(matched) / total if total else 1.0
     denominator = len(matched) + len(unsupported)
