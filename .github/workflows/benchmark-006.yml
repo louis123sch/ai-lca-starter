@@ -7,9 +7,12 @@ on:
         description: "Number of independent LLM extraction runs"
         required: false
         default: "3"
+      frozen_sha:
+        description: "Frozen extractor commit SHA; required for holdout validity"
+        required: true
 
 concurrency:
-  group: benchmark-006-${{ github.ref }}
+  group: benchmark-006-${{ github.event.inputs.frozen_sha }}
   cancel-in-progress: false
 
 jobs:
@@ -23,8 +26,14 @@ jobs:
       OPENAI_MODEL: gpt-5-mini
       AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
       AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
+      FROZEN_SHA: ${{ github.event.inputs.frozen_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out frozen extractor
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FROZEN_SHA }}
+      - name: Verify frozen checkout
+        run: test "$(git rev-parse HEAD)" = "$FROZEN_SHA"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -34,10 +43,11 @@ jobs:
         run: python -m pytest -q
       - name: Verify OpenAI secret
         run: test -n "$OPENAI_API_KEY"
-      - name: Run Benchmark 006
+      - name: Run Benchmark 006 final holdout
         shell: bash
         run: |
           RUNS="${{ github.event.inputs.runs }}"; [ -n "$RUNS" ] || RUNS=3
+          echo "FINAL HOLDOUT on frozen extractor $FROZEN_SHA. Do not alter prompts, evaluator, fixtures, or gold to improve this score."
           bash scripts/run_resilient_benchmark.sh \
             python -m ai_lca.benchmark live \
               --expected benchmarks/terlouw_2021/expected.json \
@@ -60,7 +70,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-006-${{ github.run_id }}
+          name: benchmark-006-final-holdout-${{ env.FROZEN_SHA }}-${{ github.run_id }}
           path: benchmark_runs/terlouw_2021
           if-no-files-found: warn
           retention-days: 30
