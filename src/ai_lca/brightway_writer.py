@@ -4,9 +4,10 @@ import math
 import re
 from dataclasses import dataclass, field
 
-import pandas as pd
 import bw2data as bd
+import pandas as pd
 
+from .geography import ecoinvent_location_hints
 from .models import InventoryExtraction
 
 
@@ -233,6 +234,10 @@ def write_foreground_database(
             f"Brightway database {database_name!r} already exists. Choose a new name; the writer never overwrites databases."
         )
 
+    paper_geography = _text(extraction.study_context.operational_geography)
+    location_hints = ecoinvent_location_hints(paper_geography)
+    brightway_location = location_hints[0] if location_hints else None
+
     db = bd.Database(database_name)
     db.register()
 
@@ -248,8 +253,10 @@ def write_foreground_database(
                 "ai_lca_process_id": process.process_id,
                 "ai_lca_source_summary": extraction.source_summary,
             }
-            if extraction.study_context.operational_geography:
-                kwargs["location"] = extraction.study_context.operational_geography
+            if paper_geography:
+                kwargs["ai_lca_operational_geography"] = paper_geography
+            if brightway_location:
+                kwargs["location"] = brightway_location
             if extraction.provenance:
                 kwargs["ai_lca_extractor_version"] = extraction.provenance.extractor_version
                 kwargs["ai_lca_model"] = extraction.provenance.model
@@ -287,5 +294,7 @@ def write_foreground_database(
         "database": database_name,
         "processes_created": len(created),
         "exchanges_created": len(plan.exchanges),
+        "brightway_location": brightway_location,
+        "paper_geography": paper_geography or None,
         "warnings": plan.warnings,
     }
