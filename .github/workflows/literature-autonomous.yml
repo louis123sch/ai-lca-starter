@@ -59,9 +59,9 @@ jobs:
             --max-concurrent-requests 3 \
             --max-process-workers 3 \
             --max-paper-workers 1 \
-            --max-total-calls 15 \
-            --max-calls-per-paper 15 \
-            --max-total-tokens 1500000 \
+            --max-total-calls 35 \
+            --max-calls-per-paper 35 \
+            --max-total-tokens 2000000 \
             --max-estimated-cost-usd 0.75 \
             --max-repair-calls-per-process 1
       - name: Show latest report
