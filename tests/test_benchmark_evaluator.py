@@ -1,4 +1,4 @@
-from ai_lca.benchmark import evaluate_extraction
+from ai_lca.benchmark import _score_name, evaluate_extraction
 from ai_lca.models import ForegroundProcess, InventoryExtraction, StudyContext
 
 
@@ -96,3 +96,20 @@ def test_child_process_is_forbidden_even_when_name_matches_expected_alias():
 
     assert report.matched_processes == 1
     assert "PEMEC (unexpected child process)" in report.forbidden_processes
+
+
+def test_generic_modelling_qualifiers_do_not_create_false_negative():
+    assert _score_name(
+        "MPW to methanol (foreground product system)",
+        ["MPW-methanol", "mixed plastic waste methanol"],
+    ) >= 0.60
+    assert _score_name(
+        "MPW to hydrogen (cradle-to-gate LCA foreground process)",
+        ["MPW-hydrogen", "mixed plastic waste hydrogen"],
+    ) >= 0.60
+
+
+def test_name_core_preserves_technology_token_order():
+    forward = _score_name("methanol to hydrogen foreground process", ["methanol-hydrogen"])
+    reversed_direction = _score_name("hydrogen to methanol foreground process", ["methanol-hydrogen"])
+    assert forward > reversed_direction
