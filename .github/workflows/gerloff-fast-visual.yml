@@ -10,6 +10,7 @@ on:
       - "src/ai_lca/benchmark_visual_evidence.py"
       - "src/ai_lca/benchmark_visual_to_flows.py"
       - "src/ai_lca/benchmark_context_dilution.py"
+      - "src/ai_lca/benchmark_text_inventory_lists.py"
       - "tests/test_visual_evidence_benchmark.py"
       - "benchmarks/gerloff_2021/build_visual_fixture.py"
       - "benchmarks/gerloff_2021/visual_flows.csv"
@@ -23,7 +24,7 @@ concurrency:
 jobs:
   fast-visual:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
@@ -77,10 +78,20 @@ jobs:
             --min-precision 0.95 \
             --output benchmark_runs/gerloff_2021/fast_visual_to_flow_report.json
 
+      - name: Run focused machine-readable inventory-list regression
+        run: |
+          python -m ai_lca.benchmark_text_inventory_lists \
+            --source benchmarks/gerloff_2021/source_main_excerpt.txt \
+            --expected benchmarks/gerloff_2021/flows.csv \
+            --model "$OPENAI_MODEL" \
+            --min-recall 0.95 \
+            --min-precision 0.95 \
+            --output benchmark_runs/gerloff_2021/fast_text_list_report.json
+
       - name: Diagnose full-context dilution of visual rows
         continue-on-error: true
         run: |
-          python -m ai_lca.benchmark_context_dilution \
+          timeout 600s python -m ai_lca.benchmark_context_dilution \
             --visual-source benchmarks/gerloff_2021/source_visual_inventory.docx \
             --text-source benchmarks/gerloff_2021/source_main_excerpt.txt \
             --text-source benchmarks/gerloff_2021/source_supplement_machine_readable.txt \
@@ -97,6 +108,7 @@ jobs:
           path: |
             benchmark_runs/gerloff_2021/fast_visual_report.json
             benchmark_runs/gerloff_2021/fast_visual_to_flow_report.json
+            benchmark_runs/gerloff_2021/fast_text_list_report.json
             benchmark_runs/gerloff_2021/context_dilution_report.json
           if-no-files-found: warn
           retention-days: 30
