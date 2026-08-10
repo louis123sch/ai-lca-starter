@@ -44,7 +44,7 @@ jobs:
         run: python -m pytest -q
 
   benchmark:
-    name: Gerloff multimodal paper extraction
+    name: Gerloff machine-readable supplementary extraction
     needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -78,10 +78,11 @@ jobs:
             exit 2
           fi
 
-      - name: Build normalized image-only source fixture
-        run: python benchmarks/gerloff_2021/build_visual_fixture.py
+      - name: Expand machine-readable supplementary workbook fixture
+        shell: bash
+        run: gzip -dc benchmarks/gerloff_2021/source_supplement_workbook.txt.gz > benchmarks/gerloff_2021/source_supplement_workbook.txt
 
-      - name: Run Gerloff multimodal extraction benchmark
+      - name: Run Gerloff machine-readable extraction benchmark
         shell: bash
         run: |
           RUNS="${{ github.event.inputs.runs }}"
@@ -92,17 +93,17 @@ jobs:
               RUNS=3
             fi
           fi
-          echo "Running $RUNS independent multimodal extractions"
+          echo "Running $RUNS independent extractions with machine-readable supplementary inventory"
           bash scripts/run_resilient_benchmark.sh \
             python -m ai_lca.benchmark_multimodal \
               --expected benchmarks/gerloff_2021/expected.json \
               --source \
                 benchmarks/gerloff_2021/source_main_excerpt.txt \
                 benchmarks/gerloff_2021/source_supplement_machine_readable.txt \
-                benchmarks/gerloff_2021/source_visual_inventory.docx \
+                benchmarks/gerloff_2021/source_supplement_workbook.txt \
               --runs "$RUNS" \
               --model "$OPENAI_MODEL" \
-              --max-visual-assets 8 \
+              --max-visual-assets 0 \
               --output-dir benchmark_runs/gerloff_2021
 
       - name: Enforce unseen-paper quality gate
