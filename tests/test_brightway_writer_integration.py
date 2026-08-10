@@ -4,7 +4,7 @@ import bw2data as bd
 import pandas as pd
 
 from ai_lca.brightway_writer import write_foreground_database
-from ai_lca.models import ForegroundProcess, InventoryExtraction
+from ai_lca.models import ForegroundProcess, InventoryExtraction, StudyContext
 
 
 def test_writer_creates_reviewed_database_in_temporary_brightway_project():
@@ -44,6 +44,11 @@ def test_writer_creates_reviewed_database_in_temporary_brightway_project():
             process_name="Synthetic product",
             functional_unit="1 kg product",
             source_summary="Temporary Brightway integration test",
+            study_context=StudyContext(
+                operational_geography="Germany",
+                geography_basis="explicit",
+                geography_rationale="The synthetic source explicitly states Germany.",
+            ),
             processes=[
                 ForegroundProcess(
                     process_id="p1",
@@ -106,7 +111,11 @@ def test_writer_creates_reviewed_database_in_temporary_brightway_project():
 
         assert report["processes_created"] == 1
         assert report["exchanges_created"] == 2
+        assert report["brightway_location"] == "DE"
+        assert report["paper_geography"] == "Germany"
         activity = bd.Database("reviewed-foreground").get("p1")
+        assert activity["location"] == "DE"
+        assert activity["ai_lca_operational_geography"] == "Germany"
         exchanges = list(activity.exchanges())
         assert len(exchanges) == 3  # production + technosphere input + biosphere emission
         assert any(exc["type"] == "production" for exc in exchanges)
