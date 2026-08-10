@@ -3,17 +3,73 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from pathlib import Path
 
-from .benchmark_visual_to_flows import PROCESS_NAMES, score_flows
+from .benchmark_visual_to_flows import PROCESS_NAMES
 from .llm import FLOW_SYSTEM_PROMPT, _client
 from .models import FlowExtraction
+
+
+def _norm(value: str | None) -> str:
+    if value is None:
+        return ""
+    value = value.casefold().replace("³", "3")
+    value = re.sub(r"[^a-z0-9.]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def load_unquantified_expected(path: Path) -> list[dict[str, str]]:
     """Return explicit inventory-list rows whose source does not state a quantity."""
     with path.open(newline="", encoding="utf-8") as handle:
         return [row for row in csv.DictReader(handle) if not (row.get("amount") or "").strip()]
+
+
+def score_unquantified_flows(extraction: FlowExtraction, expected: list[dict[str, str]]) -> dict:
+    unmatched = list(extraction.flows)
+    matched: list[dict] = []
+    missing: list[dict] = []
+    for row in expected:
+        found = None
+        for index, flow in enumerate(unmatched):
+            if _norm(flow.process_id) != _norm(row["process_key"]):
+                continue
+            if _norm(flow.name) != _norm(row["name"]):
+                continue
+            if flow.amount is not None:
+                continue
+            found = index
+            break
+        payload = {"process_key": row["process_key"], "name": row["name"]}
+        if found is None:
+            missing.append(payload)
+        else:
+            flow = unmatched.pop(found)
+            matched.append(payload | {"actual": flow.model_dump(mode="json")})
+
+    expected_keys = {(_norm(row["process_key"]), _norm(row["name"])) for row in expected}
+    unsupported = [
+        flow.model_dump(mode="json")
+        for flow in unmatched
+        if (_norm(flow.process_id), _norm(flow.name)) not in expected_keys
+    ]
+    total = len(expected)
+    recall = len(matched) / total if total else 1.0
+    denominator = len(matched) + len(unsupported)
+    precision = len(matched) / denominator if denominator else 1.0
+    return {
+        "expected_rows": total,
+        "matched_rows": len(matched),
+        "missing_rows": len(missing),
+        "unsupported_rows": len(unsupported),
+        "recall": recall,
+        "precision": precision,
+        "matched": matched,
+        "missing": missing,
+        "unsupported": unsupported,
+        "all_extracted_flows": [flow.model_dump(mode="json") for flow in extraction.flows],
+        "warnings": extraction.assumptions_or_warnings,
+    }
 
 
 def extract_list_flows(text: str, *, model: str | None = None) -> FlowExtraction:
@@ -62,7 +118,7 @@ def main() -> None:
 
     text = args.source.read_text(encoding="utf-8")
     extraction = extract_list_flows(text, model=args.model)
-    report = score_flows(extraction, load_unquantified_expected(args.expected))
+    report = score_unquantified_flows(extraction, load_unquantified_expected(args.expected))
     report["source"] = str(args.source)
     report["source_characters"] = len(text)
 
