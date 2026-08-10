@@ -61,6 +61,11 @@ def _unit_key(value: str) -> str:
     return aliases.get(value, value)
 
 
+def _safe_code(process_id: str) -> str:
+    code = re.sub(r"[^A-Za-z0-9_.-]+", "-", process_id.strip()).strip("-")
+    return code or "foreground-process"
+
+
 def build_write_plan(
     extraction: InventoryExtraction,
     inventory_df: pd.DataFrame,
@@ -78,6 +83,7 @@ def build_write_plan(
     exchanges: list[dict] = []
 
     process_by_id = {p.process_id: p for p in extraction.processes}
+    safe_codes: dict[str, str] = {}
     for process in extraction.processes:
         if not _text(process.reference_product):
             blockers.append(
@@ -87,6 +93,14 @@ def build_write_plan(
             blockers.append(
                 f"Process {process.process_id!r} has no reviewed reference unit."
             )
+        safe_code = _safe_code(process.process_id)
+        other = safe_codes.get(safe_code)
+        if other and other != process.process_id:
+            blockers.append(
+                f"Process IDs {other!r} and {process.process_id!r} collapse to the same Brightway code {safe_code!r}."
+            )
+        else:
+            safe_codes[safe_code] = process.process_id
 
     mappings: dict[int, dict] = {}
     if mapping_df is not None and not mapping_df.empty:
@@ -203,9 +217,30 @@ def build_write_plan(
     )
 
 
-def _safe_code(process_id: str) -> str:
-    code = re.sub(r"[^A-Za-z0-9_.-]+", "-", process_id.strip()).strip("-")
-    return code or "foreground-process"
+def _preflight_background_targets(plan: WritePlan) -> None:
+    """Verify every selected external target exists in the current Brightway project."""
+    errors: list[str] = []
+    checked: set[tuple[str, str]] = set()
+    for exchange in plan.exchanges:
+        if exchange["exchange_type"] == "technosphere_foreground":
+            continue
+        database = exchange["target_database"]
+        code = exchange["target_code"]
+        key = (database, code)
+        if key in checked:
+            continue
+        checked.add(key)
+        if database not in bd.databases:
+            errors.append(f"Mapped Brightway database {database!r} is not present in the selected project.")
+            continue
+        try:
+            bd.Database(database).get(code)
+        except Exception:
+            errors.append(
+                f"Mapped Brightway node ({database!r}, {code!r}) no longer exists in the selected project."
+            )
+    if errors:
+        raise ValueError("Foreground write preflight failed:\n- " + "\n- ".join(errors))
 
 
 def write_foreground_database(
@@ -233,6 +268,7 @@ def write_foreground_database(
         raise ValueError(
             f"Brightway database {database_name!r} already exists. Choose a new name; the writer never overwrites databases."
         )
+    _preflight_background_targets(plan)
 
     paper_geography = _text(extraction.study_context.operational_geography)
     location_hints = ecoinvent_location_hints(paper_geography)
