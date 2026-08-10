@@ -92,10 +92,14 @@ def review_bundle_to_json(
     extraction: InventoryExtraction,
     inventory_df: pd.DataFrame,
     mapping_df: pd.DataFrame | None = None,
+    *,
+    original_extraction: InventoryExtraction | None = None,
 ) -> str:
-    """Export source-grounded extraction, human-reviewed rows and mappings together."""
+    """Export both the untouched AI proposal and the final human-reviewed state."""
+    original = original_extraction or extraction
     payload = {
-        "extraction": extraction.model_dump(mode="json"),
+        "original_ai_extraction": original.model_dump(mode="json"),
+        "reviewed_extraction": extraction.model_dump(mode="json"),
         "reviewed_inventory": _records(inventory_df),
         "selected_mappings": _records(mapping_df),
     }
