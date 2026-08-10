@@ -7,11 +7,14 @@ on:
     paths:
       - "src/ai_lca/llm.py"
       - "src/ai_lca/documents.py"
+      - "src/ai_lca/resilient.py"
+      - "src/ai_lca/benchmark_multimodal.py"
       - "src/ai_lca/benchmark_visual_evidence.py"
       - "src/ai_lca/benchmark_visual_to_flows.py"
       - "src/ai_lca/benchmark_context_dilution.py"
       - "src/ai_lca/benchmark_text_inventory_lists.py"
       - "tests/test_visual_evidence_benchmark.py"
+      - "tests/test_resilient.py"
       - "benchmarks/gerloff_2021/build_visual_fixture.py"
       - "benchmarks/gerloff_2021/visual_flows.csv"
       - ".github/workflows/gerloff-fast-visual.yml"
@@ -43,8 +46,8 @@ jobs:
       - name: Install package
         run: python -m pip install -e ".[test]"
 
-      - name: Run deterministic scorer tests
-        run: python -m pytest -q tests/test_visual_evidence_benchmark.py
+      - name: Run deterministic focused-recovery tests
+        run: python -m pytest -q tests/test_visual_evidence_benchmark.py tests/test_resilient.py
 
       - name: Verify OpenAI secret exists
         shell: bash
