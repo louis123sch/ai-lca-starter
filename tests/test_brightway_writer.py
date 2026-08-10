@@ -78,3 +78,27 @@ def test_write_plan_blocks_unit_mismatch_without_conversion():
     plan = build_write_plan(extraction(), inv, mappings)
     assert plan.ready is False
     assert any("no automatic conversion" in blocker for blocker in plan.blockers)
+
+
+def test_write_plan_blocks_process_ids_that_collapse_to_same_brightway_code():
+    ambiguous = InventoryExtraction(
+        process_name="Synthetic",
+        source_summary="Code collision test",
+        processes=[
+            ForegroundProcess(
+                process_id="route A",
+                name="Route A",
+                reference_product="product A",
+                reference_unit="kg",
+            ),
+            ForegroundProcess(
+                process_id="route-A",
+                name="Route B",
+                reference_product="product B",
+                reference_unit="kg",
+            ),
+        ],
+    )
+    plan = build_write_plan(ambiguous, pd.DataFrame())
+    assert plan.ready is False
+    assert any("same Brightway code" in blocker for blocker in plan.blockers)
