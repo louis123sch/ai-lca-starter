@@ -49,6 +49,14 @@ def load_unquantified_expected(path: Path) -> list[dict[str, str]]:
 
 
 def score_unquantified_flows(extraction: FlowExtraction, expected: list[dict[str, str]]) -> dict:
+    """Score only the unquantified inventory-list slice targeted by this focused regression.
+
+    The focused pass may legitimately recover quantified foreground flows that happen to be
+    present in the same source excerpt. Those rows are useful extraction output, but they are
+    outside this benchmark slice rather than unsupported hallucinations. Precision is therefore
+    computed against unmatched *unquantified* rows only; quantified rows remain visible in the
+    report as out-of-scope extractions so the benchmark does not hide them.
+    """
     unmatched = list(extraction.flows)
     matched: list[dict] = []
     missing: list[dict] = []
@@ -71,7 +79,9 @@ def score_unquantified_flows(extraction: FlowExtraction, expected: list[dict[str
             flow = unmatched.pop(found)
             matched.append(payload | {"actual": flow.model_dump(mode="json")})
 
-    unsupported = [flow.model_dump(mode="json") for flow in unmatched]
+    unsupported_flows = [flow for flow in unmatched if flow.amount is None]
+    quantified_out_of_scope = [flow for flow in unmatched if flow.amount is not None]
+    unsupported = [flow.model_dump(mode="json") for flow in unsupported_flows]
     total = len(expected)
     recall = len(matched) / total if total else 1.0
     denominator = len(matched) + len(unsupported)
@@ -81,11 +91,13 @@ def score_unquantified_flows(extraction: FlowExtraction, expected: list[dict[str
         "matched_rows": len(matched),
         "missing_rows": len(missing),
         "unsupported_rows": len(unsupported),
+        "quantified_out_of_scope_rows": len(quantified_out_of_scope),
         "recall": recall,
         "precision": precision,
         "matched": matched,
         "missing": missing,
         "unsupported": unsupported,
+        "quantified_out_of_scope": [flow.model_dump(mode="json") for flow in quantified_out_of_scope],
         "all_extracted_flows": [flow.model_dump(mode="json") for flow in extraction.flows],
         "warnings": extraction.assumptions_or_warnings,
     }
