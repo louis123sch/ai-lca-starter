@@ -7,6 +7,37 @@ import pandas as pd
 from .models import InventoryExtraction
 
 
+def ensure_flow_ids(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy with unique integer flow IDs, including human-added editor rows."""
+    result = df.copy()
+    if "flow_id" not in result.columns:
+        result.insert(0, "flow_id", pd.NA)
+
+    used: set[int] = set()
+    next_id = 0
+    normalized: list[int] = []
+    for raw in result["flow_id"].tolist():
+        parsed: int | None = None
+        try:
+            if raw is not None and not pd.isna(raw):
+                candidate = int(raw)
+                if candidate >= 0 and candidate not in used:
+                    parsed = candidate
+        except (TypeError, ValueError, OverflowError):
+            parsed = None
+
+        if parsed is None:
+            while next_id in used:
+                next_id += 1
+            parsed = next_id
+        used.add(parsed)
+        next_id = max(next_id, parsed + 1)
+        normalized.append(parsed)
+
+    result["flow_id"] = normalized
+    return result
+
+
 def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
     rows = []
     process_names = {p.process_id: p.name for p in extraction.processes}
