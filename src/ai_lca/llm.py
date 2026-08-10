@@ -71,6 +71,14 @@ Protected extraction invariants:
 - listed components remain foreground input flows, not background subprocesses;
 - do not reclassify such tabulated components as background subprocesses;
 - it is better to retain an explicit listed inventory item with amount=null than to invent or omit a quantity.
+
+EXHAUSTIVE INVENTORY-LIST COMPLETENESS CHECK:
+- Before finalising the flow list, scan the entire supplied source again specifically for explicit inventory lists: table rows, numbered or bulleted component lists, BoP/stack component groups, supplementary inventory tables, and transcribed visual tables.
+- For each locked process, compare every distinct listed inventory item against the flows you are about to return. If a listed modeled item is missing, add it before finalising.
+- This completeness check applies equally to the main paper, supplementary material, and transcribed visual evidence. Do not stop after extracting a representative subset from a long list.
+- When an explicit list contains many items, extract EVERY distinct source-supported item belonging to the modeled foreground inventory, even if no amount is stated. Use amount=null when the source gives no amount.
+- Preserve each listed item's printed name and word order. Do not replace it with a synonym or a more convenient canonical name.
+- Do not use this completeness check to add descriptive prose, background dataset detail, or unsupported items. It is only an exhaustive audit of explicit source-supported inventory lists against the already locked foreground processes.
 """
 
 
