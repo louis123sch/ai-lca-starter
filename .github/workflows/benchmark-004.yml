@@ -65,8 +65,12 @@ jobs:
           path: benchmark_runs/gonzales_calienes_2025
           if-no-files-found: warn
           retention-days: 30
-      - name: Advance to Benchmark 005
+      - name: Start frozen holdout validation
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run benchmark-005.yml --repo "$GITHUB_REPOSITORY" --ref main -f runs=3
+          FROZEN_SHA: ${{ github.sha }}
+        run: |
+          echo "Freezing extractor at $FROZEN_SHA for holdouts 005 and 006"
+          gh workflow run benchmark-005.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f runs=3 -f frozen_sha="$FROZEN_SHA"
