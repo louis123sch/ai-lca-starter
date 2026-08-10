@@ -26,25 +26,64 @@ Rules:
 6. Do not infer ecoinvent mappings, voltage levels, markets, geographies, production routes, or missing quantities.
 7. Keep evidence text short and source-faithful. Preserve provenance markers when present.
 8. If the chunk contains no explicit modeled inventory list/table rows, return an empty flow list.
+9. Do not emit both an intermediate calculation/plant-total row and its explicitly reported final functional-unit-normalised row as separate flows when the source makes clear they represent the same inventory contribution. Prefer the final modeled basis; retain both only when the source explicitly models them as distinct exchanges.
+10. Column-unit suffixes, row numbers, counts, or explanatory qualifiers are source evidence, not reasons to duplicate an inventory item already recovered from the same process and direction.
 """
+
+
+_UNIT_SUFFIX_RE = re.compile(
+    r"\(\s*(?:l|ml|kg|g|mg|t|kwh|mwh|wh|mj|gj|j|m3|m2|m|kw|mw|w|bar|pa)\s*\)\s*$",
+    re.IGNORECASE,
+)
 
 
 def _normalise_name(value: str) -> str:
     value = value.casefold().replace("&", " and ").replace("³", "3")
+    # Row numbers and column-unit suffixes are presentation metadata, not flow identity.
+    value = re.sub(r"^\s*\d+[\s.)-]+(?=\S)", "", value)
+    value = _UNIT_SUFFIX_RE.sub(" ", value)
     # Counts and explanatory parentheticals are useful evidence but should not create duplicate identities.
     value = re.sub(r"\((?:\s*\d+\s*(?:x|×)?\s*|including[^)]*|rectifier[^)]*|de-oxo[^)]*)\)", " ", value)
     value = re.sub(r"[^a-z0-9]+", " ", value)
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _manufacturing_energy_identity(flow: InventoryFlow) -> str | None:
+    """Collapse alternate labels for the same explicitly identified manufacturing-energy contribution."""
+    unit = (flow.unit or "").casefold()
+    if not any(token in unit for token in ("wh", "joule", "kj", "mj", "gj")):
+        return None
+    evidence = (flow.evidence.evidence_text or "").casefold()
+    combined = f"{flow.name.casefold()} {evidence}"
+    if "manufacturing energy" not in combined:
+        return None
+
+    residual = _normalise_name(flow.name)
+    process_token = _normalise_name(flow.process_id)
+    if process_token:
+        residual = re.sub(rf"\b{re.escape(process_token)}\b", " ", residual)
+    residual = re.sub(r"\badditional manufacturing energy\b", " ", residual)
+    residual = re.sub(r"\bmanufacturing energy\b", " ", residual)
+    residual = re.sub(r"\s+", " ", residual).strip()
+    if "stack" in residual:
+        return "manufacturing energy stack"
+    if re.search(r"\b(?:bop|balance of plant)\b", residual):
+        return "manufacturing energy bop"
+    return None
+
+
 def _flow_identity(flow: InventoryFlow) -> tuple[str, str, str]:
-    return flow.process_id.casefold().strip(), _normalise_name(flow.name), flow.direction
+    semantic = _manufacturing_energy_identity(flow)
+    return flow.process_id.casefold().strip(), semantic or _normalise_name(flow.name), flow.direction
 
 
-def _flow_quality(flow: InventoryFlow) -> tuple[int, int, int]:
-    """Prefer quantified and better-provenanced duplicates without inventing reconciliation."""
+def _flow_quality(flow: InventoryFlow) -> tuple[int, int, int, int]:
+    """Prefer quantified, specific-basis and better-provenanced duplicates without inventing reconciliation."""
+    unit = (flow.unit or "").casefold()
+    specific_basis = int("/" in unit or " per " in f" {unit} ")
     return (
         int(flow.amount is not None),
+        specific_basis,
         int(bool(flow.unit)),
         len((flow.evidence.evidence_text or "").strip()),
     )
