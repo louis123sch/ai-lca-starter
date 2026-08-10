@@ -24,20 +24,21 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 12
+          fetch-depth: 20
 
-      - name: Confirm expected failed head is still current
+      - name: Confirm diagnosed Yang head is still an ancestor
         id: freshness
         shell: bash
         run: |
           git fetch origin main
           CURRENT="$(git rev-parse origin/main)"
           EXPECTED="4b2243a7bd38a9d3b92a1649c2916c4f1cdd8c00"
-          if [ "$CURRENT" != "$EXPECTED" ]; then
-            echo "Current main $CURRENT differs from the diagnosed Yang head $EXPECTED; stopping to avoid stale repair."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
+          if git merge-base --is-ancestor "$EXPECTED" "$CURRENT"; then
+            echo "Diagnosed Yang head $EXPECTED is still in current main history ($CURRENT)."
             echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Diagnosed Yang head is no longer an ancestor of current main; stopping stale repair."
+            echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download failed Yang artifact
