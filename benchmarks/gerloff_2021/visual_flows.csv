@@ -1,0 +1,31 @@
+process_key,name,amount,unit
+aec,low-alloyed steel for container,6075.6,kg
+aec,concrete for foundation,7.7,m3
+aec,chromium steel for anode and cathode frame,20194.4,kg
+aec,nickel for anode and cathode frame,2884.9,kg
+aec,tetrafluoroethylene for gasket,144.2,kg
+aec,polysulfone for Zirfon diaphragm,48.8,kg
+aec,zirconium oxide for Zirfon diaphragm,73.0,kg
+pemec,low-alloyed steel for container,2250.0,kg
+pemec,concrete for foundation,2.3,m3
+pemec,titanium for bipolar plate,528.0,kg
+pemec,tetrafluoroethylene for membrane polymer,16.0,kg
+pemec,carbon black for electrocatalyst anode,4.5,kg
+pemec,iridium for electrocatalyst anode,0.8,kg
+pemec,platinum for electrocatalyst cathode,0.075,kg
+pemec,copper for current collector,4.5,kg
+pemec,synthetic rubber for gasket,4.8,kg
+soec,low-alloyed steel for container,2250.0,kg
+soec,concrete for foundation,2.3,m3
+soec,chromium steel for air electrode,8976.1,kg
+soec,praseodymium oxide for air electrode screen printing,9.0,kg
+soec,nickel for air electrode screen printing,7.5,kg
+soec,zirconium oxide for blocking layer,170.7,kg
+soec,samarium europium gadolinium concentrate for blocking layer,14.8,kg
+soec,cerium concentrate for blocking layer screen printing,91.5,kg
+soec,samarium europium gadolinium concentrate for blocking layer screen printing,22.9,kg
+soec,aluminium oxide for electrolyte and H2 electrode,6.4,kg
+soec,boric oxide for electrolyte and H2 electrode,6.4,kg
+soec,barium oxide for electrolyte and H2 electrode,6.4,kg
+soec,silicone product for electrolyte and H2 electrode,6.4,kg
+soec,nickel for electrolyte and H2 electrode,136.6,kg
