@@ -17,16 +17,25 @@ def list_databases(project_name: str | None = None) -> list[str]:
     return sorted(list(bd.databases))
 
 
-def _activity_to_dict(activity) -> dict:
+def list_biosphere_databases(project_name: str | None = None) -> list[str]:
+    return [name for name in list_databases(project_name) if "biosphere" in name.casefold()]
+
+
+def _node_to_dict(node) -> dict:
+    categories = node.get("categories", ()) or ()
+    if isinstance(categories, str):
+        categories = (categories,)
     return {
-        "id": getattr(activity, "id", None),
-        "database": activity.get("database", ""),
-        "code": activity.get("code", ""),
-        "name": activity.get("name", ""),
-        "reference_product": activity.get("reference product", activity.get("product", "")),
-        "location": activity.get("location", ""),
-        "unit": activity.get("unit", ""),
-        "comment": (activity.get("comment", "") or "")[:500],
+        "id": getattr(node, "id", None),
+        "database": node.get("database", ""),
+        "code": node.get("code", ""),
+        "name": node.get("name", ""),
+        "reference_product": node.get("reference product", node.get("product", "")),
+        "location": node.get("location", ""),
+        "unit": node.get("unit", ""),
+        "categories": " / ".join(str(x) for x in categories),
+        "type": node.get("type", ""),
+        "comment": (node.get("comment", "") or "")[:500],
     }
 
 
@@ -38,11 +47,11 @@ def search_candidates(
     preferred_locations: Iterable[str] | None = None,
     limit: int = 12,
 ) -> list[dict]:
-    """Return real Brightway/ecoinvent activities with an optional soft geography boost.
+    """Return real Brightway nodes with an optional soft geography boost.
 
-    Geography never filters candidates out. When the paper provides an operational
-    geography, matching ecoinvent locations are moved upward while Brightway's search
-    order is otherwise retained.
+    The function works for technosphere databases and biosphere databases. Geography
+    never filters candidates out. When the paper provides an operational geography,
+    matching locations are moved upward while Brightway's search order is otherwise retained.
     """
     set_project(project_name)
     if database_name not in bd.databases:
@@ -60,6 +69,6 @@ def search_candidates(
     if preferred:
         indexed = list(enumerate(results))
         indexed.sort(key=lambda pair: (0 if pair[1].get("location", "") in preferred else 1, pair[0]))
-        results = [activity for _, activity in indexed]
+        results = [node for _, node in indexed]
 
-    return [_activity_to_dict(act) for act in results[:limit]]
+    return [_node_to_dict(node) for node in results[:limit]]
