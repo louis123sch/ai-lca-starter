@@ -13,7 +13,7 @@ from .benchmark import (
     load_expected,
     report_to_dict,
 )
-from .llm import extract_inventory_from_documents
+from .resilient import extract_inventory_from_documents_resilient
 
 
 def run_multimodal_benchmark(
@@ -25,7 +25,7 @@ def run_multimodal_benchmark(
     output_dir: Path,
     max_visual_assets: int = 24,
 ):
-    """Run the benchmark through the same multimodal document path used by the app."""
+    """Run the benchmark through the resilient multimodal document path."""
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not set. Configure it before running the live benchmark.")
 
@@ -35,7 +35,7 @@ def run_multimodal_benchmark(
     reports = []
 
     for n in range(1, runs + 1):
-        extraction = extract_inventory_from_documents(
+        extraction = extract_inventory_from_documents_resilient(
             documents,
             model=model,
             extra_instructions=BENCHMARK_EXTRA_INSTRUCTIONS,
@@ -56,6 +56,7 @@ def run_multimodal_benchmark(
         "runs": runs,
         "model": model or os.getenv("OPENAI_MODEL", "gpt-5-mini"),
         "multimodal": True,
+        "resilient_focused_recovery": True,
         "max_visual_assets": max_visual_assets,
         "mean_overall_score": statistics.fmean(r.overall_score for r in reports),
         "min_overall_score": min(r.overall_score for r in reports),
