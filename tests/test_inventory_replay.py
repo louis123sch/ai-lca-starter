@@ -57,3 +57,17 @@ def test_compare_blocks_resolved_control_regression() -> None:
     report = compare(before, results)
     assert report["pass_gate"] is False
     assert report["regressions"][0]["reason"] == "resolved control regressed"
+
+
+def test_compare_blocks_missing_replay_result() -> None:
+    before = {
+        "missing": {
+            "status": "UNRESOLVED_INVENTORY",
+            "ambiguous_or_missing_candidate_count": 2,
+            "flow_count": 3,
+            "candidate_coverage": 0.5,
+        }
+    }
+    report = compare(before, [])
+    assert report["pass_gate"] is False
+    assert report["regressions"][0]["reason"] == "paper produced no replay result"

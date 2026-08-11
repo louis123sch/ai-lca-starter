@@ -51,7 +51,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: corpus_baseline_state
-          key: corpus-baseline-v1-2026-08-11-artifact-9094408729
+          key: corpus-baseline-v1-1-2026-08-11-artifact-9094408729
       - name: Seed frozen corpus from baseline artifact
         if: steps.corpus-cache.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4
@@ -68,8 +68,17 @@ jobs:
           rm -rf literature_state artifacts
           cp -a corpus_baseline_state literature_state
           mkdir -p artifacts
-      - name: Zero-token diagnostics
-        run: python -m ai_lca.corpus_diagnostics --state-dir literature_state --output artifacts/diagnostics.json
+      - name: Zero-token exact-corpus diagnostics
+        run: |
+          python -m ai_lca.corpus_diagnostics --state-dir literature_state --output artifacts/diagnostics.json
+          python - <<'PY'
+          import json
+          report=json.load(open('artifacts/diagnostics.json'))
+          assert report['baseline_id'] == 'corpus_baseline_v1_1_2026-08-11'
+          assert report['paper_count'] == 44
+          assert report['status_counts'].get('UNRESOLVED_INVENTORY') == 37
+          assert report['status_counts'].get('COMPLETE') == 7
+          PY
       - name: Verify API key for model-backed gates
         if: inputs.gate != 'diagnostics'
         shell: bash
