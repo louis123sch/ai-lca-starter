@@ -2,14 +2,20 @@ from ai_lca.flow_audit import merge_missing_flows
 from ai_lca.models import InventoryFlow, SourceEvidence
 
 
-def _flow(name: str, evidence_text: str, process_id: str = "P1") -> InventoryFlow:
+def _flow(
+    name: str,
+    evidence_text: str,
+    process_id: str = "P1",
+    direction: str = "input",
+    linked_process_id: str | None = None,
+) -> InventoryFlow:
     return InventoryFlow(
         process_id=process_id,
         name=name,
         amount=None,
         unit=None,
-        direction="input",
-        linked_process_id=None,
+        direction=direction,
+        linked_process_id=linked_process_id,
         component_or_stage=None,
         basis=None,
         notes=None,
@@ -54,6 +60,25 @@ def test_merge_deduplicates_exact_normalised_flow_key():
     source = "Inventory table: steel frame."
     initial = [_flow("Steel Frame", "steel frame")]
     audited = [_flow("  steel   frame ", "steel frame")]
+
+    merged = merge_missing_flows(
+        initial,
+        audited,
+        source_text=source,
+        allowed_process_ids={"P1"},
+    )
+
+    assert merged == initial
+
+
+def test_merge_rejects_non_input_and_linked_audit_additions():
+    source = "Inventory table: hydrogen; oxygen; cooling water."
+    initial = [_flow("cooling water", "cooling water")]
+    audited = [
+        _flow("hydrogen", "hydrogen", direction="output"),
+        _flow("oxygen", "oxygen", direction="output"),
+        _flow("linked water", "cooling water", linked_process_id="P2"),
+    ]
 
     merged = merge_missing_flows(
         initial,
