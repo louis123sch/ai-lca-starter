@@ -16,6 +16,7 @@ def report(
     audit=None,
     safe_excluded=None,
     corrected_baseline=None,
+    error=None,
 ):
     payload = {
         "dois": [DOI],
@@ -37,6 +38,8 @@ def report(
             "estimated_cost_this_run_usd": cost,
         },
     }
+    if error is not None:
+        payload["results"][0]["error"] = error
     if audit is not None:
         payload["router_audit"] = audit
     return payload
@@ -123,3 +126,30 @@ def test_retrieval_gate_rejects_router_safety_failure():
     comparison = compare_reports(control, routed)
     assert comparison["pass_gate"] is False
     assert comparison["router_safety_pass"] is False
+
+
+def test_budget_stop_is_benchmark_incomplete_not_quality_regression():
+    control = report(
+        status="BUDGET_STOP",
+        ambiguity=0,
+        coverage=0.0,
+        process_count=0,
+        flows=0,
+        error="MAX_CALLS_PER_PAPER reached",
+    )
+    routed = report(
+        status="UNRESOLVED_INVENTORY",
+        ambiguity=2,
+        coverage=1.0,
+        process_count=7,
+        flows=20,
+        tokens=80,
+        cost=0.08,
+        audit=safe_audit(),
+    )
+    comparison = compare_reports(control, routed)
+    assert comparison["pass_gate"] is False
+    assert comparison["benchmark_complete"] is False
+    assert comparison["failure_mode"] == "benchmark_incomplete"
+    assert comparison["regressions"] == []
+    assert comparison["benchmark_incomplete_pairs"][0]["control_status"] == "BUDGET_STOP"
