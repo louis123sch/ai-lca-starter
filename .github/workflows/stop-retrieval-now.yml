@@ -1,0 +1,15 @@
+name: Stop retrieval run
+
+on:
+  push:
+    branches: [agent/retrieval-before-reasoning-clean]
+
+concurrency:
+  group: retrieval-before-reasoning-autonomous-pr15
+  cancel-in-progress: true
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Stopper run used to cancel the active retrieval iteration."
