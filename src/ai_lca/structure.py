@@ -32,15 +32,32 @@ def lock_foreground_interpretation(
             continue
         by_id[candidate_id] = candidate
 
+    # An assessed product system is a top-level alternative by definition. A nested,
+    # independently modelled foreground activity must use interconnected_foreground_process.
+    # This prevents scenario/configuration variants from becoming child processes merely
+    # because a model labels them as additional assessed systems.
+    suppressed_child_assessed_ids = {
+        candidate_id
+        for candidate_id, candidate in by_id.items()
+        if candidate.role == "assessed_product_system" and candidate.parent_candidate_id
+    }
+    for candidate_id in suppressed_child_assessed_ids:
+        candidate = by_id[candidate_id]
+        warnings.append(
+            f"Candidate {candidate.name!r} was classified as an assessed product system but also had "
+            "a parent; retained it as a candidate only. Nested foreground activities require the "
+            "interconnected_foreground_process role."
+        )
+
     accepted_ids = {
         candidate_id
         for candidate_id, candidate in by_id.items()
-        if candidate.role in LOCKED_PROCESS_ROLES
+        if candidate.role in LOCKED_PROCESS_ROLES and candidate_id not in suppressed_child_assessed_ids
     }
 
     processes: list[ForegroundProcess] = []
     for candidate_id, candidate in by_id.items():
-        if candidate.role not in LOCKED_PROCESS_ROLES:
+        if candidate.role not in LOCKED_PROCESS_ROLES or candidate_id in suppressed_child_assessed_ids:
             continue
 
         parent_id = candidate.parent_candidate_id.strip() if candidate.parent_candidate_id else None
