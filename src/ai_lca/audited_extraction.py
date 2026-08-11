@@ -25,12 +25,20 @@ def _structure_for_process(structure: ForegroundStructure, process_id: str) -> F
 def extract_inventory_from_documents_audited(
     documents: list[tuple[str, bytes]],
     *,
+    audit_documents: list[tuple[str, bytes]] | None = None,
     model: str | None = None,
     api_key: str | None = None,
     extra_instructions: str = "",
     max_visual_assets: int = 24,
 ) -> InventoryExtraction:
-    """Document extraction with independent conservative per-process missing-flow audits."""
+    """Document extraction with independent conservative per-process missing-flow audits.
+
+    ``documents`` define the evidence used to identify and lock the foreground structure and
+    perform the initial flow extraction. Optional ``audit_documents`` are visible only to the
+    completeness audit. This lets very large supplementary inventory exports improve exhaustive
+    flow recovery without allowing background-dataset detail to redesign an already supported
+    foreground graph.
+    """
     text, assets, ingestion_warnings = combine_document_evidence(
         documents,
         max_visual_assets=max_visual_assets,
@@ -48,6 +56,29 @@ def extract_inventory_from_documents_audited(
         extra_instructions=extra_instructions,
         source_mode="documents",
     )
+
+    audit_text = enriched_text
+    audit_ingestion_warnings: list[str] = []
+    audit_vision_warnings: list[str] = []
+    if audit_documents:
+        supplemental_text, supplemental_assets, audit_ingestion_warnings = combine_document_evidence(
+            audit_documents,
+            max_visual_assets=max_visual_assets,
+        )
+        supplemental_enriched, audit_vision_warnings = augment_text_with_visual_evidence(
+            supplemental_text,
+            supplemental_assets,
+            model=model,
+            api_key=api_key,
+        )
+        if supplemental_enriched.strip():
+            audit_text = (
+                f"{enriched_text.rstrip()}\n\n"
+                "[BEGIN AUDIT-ONLY SUPPLEMENTARY INVENTORY EVIDENCE]\n"
+                f"{supplemental_enriched.strip()}\n"
+                "[END AUDIT-ONLY SUPPLEMENTARY INVENTORY EVIDENCE]"
+            )
+
     structure = ForegroundStructure(
         process_name=extraction.process_name,
         functional_unit=extraction.functional_unit,
@@ -73,7 +104,7 @@ def extract_inventory_from_documents_audited(
             flows=[flow for flow in flows if flow.process_id == process.process_id],
         )
         audited = audit_missing_flows(
-            enriched_text,
+            audit_text,
             process_structure,
             process_initial,
             client=client,
@@ -82,7 +113,7 @@ def extract_inventory_from_documents_audited(
         flows = merge_missing_flows(
             flows,
             audited.flows,
-            source_text=enriched_text,
+            source_text=audit_text,
             allowed_process_ids={process.process_id},
         )
         audit_warnings.extend(audited.assumptions_or_warnings)
@@ -93,6 +124,8 @@ def extract_inventory_from_documents_audited(
             + audit_warnings
             + ingestion_warnings
             + vision_warnings
+            + audit_ingestion_warnings
+            + audit_vision_warnings
         )
     )
     return extraction.model_copy(
