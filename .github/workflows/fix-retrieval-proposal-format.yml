@@ -1,0 +1,46 @@
+name: Repair retrieval proposal patch formatting
+
+on:
+  push:
+    branches: [agent/retrieval-before-reasoning-clean]
+    paths:
+      - ".github/workflows/fix-retrieval-proposal-format.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/retrieval-before-reasoning-clean
+          fetch-depth: 0
+
+      - name: Make retrieval repair output format explicit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/ai_lca/retrieval_autonomous_iteration.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''Return a small git unified diff touching ONLY allowed files, with tests for behavior changes. When genuine candidate-level regressions are present, do not return an empty diff merely because success is uncertain: implement the safest bounded experiment justified by the hypothesis. Empty diff is appropriate only for benchmark/infrastructure censoring or when all possible changes would violate scientific integrity.'''
+          new = '''Return ONLY a standard git unified diff in unified_diff touching ONLY allowed files, with tests for behavior changes. The unified_diff value MUST use conventional git patch headers exactly like `--- a/<path>` and `+++ b/<path>` followed by numbered `@@ -old,+new @@` hunks. Do NOT use Markdown fences, `*** Begin Patch`, `*** Update File`, `*** End Patch`, apply_patch syntax, prose, or any other custom patch format inside unified_diff. When genuine candidate-level regressions are present, do not return an empty diff merely because success is uncertain: implement the safest bounded experiment justified by the hypothesis. Empty diff is appropriate only for benchmark/infrastructure censoring or when all possible changes would violate scientific integrity.'''
+          if old not in text:
+              raise SystemExit('expected PATCH_SYSTEM_PROMPT text not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify source compiles
+        run: python -m py_compile src/ai_lca/retrieval_autonomous_iteration.py
+
+      - name: Commit proposal-format repair
+        run: |
+          git config user.name "ai-lca-autonomy-repair"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/ai_lca/retrieval_autonomous_iteration.py
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix retrieval repair patch format"
+          git push origin HEAD:agent/retrieval-before-reasoning-clean
