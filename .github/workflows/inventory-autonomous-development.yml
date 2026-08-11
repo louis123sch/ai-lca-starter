@@ -1,11 +1,13 @@
 name: Autonomous inventory recall development
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/inventory-autonomous-development.yml"
   workflow_dispatch:
+    inputs:
+      run_iteration:
+        description: "Run one autonomous inventory iteration and continue the chain"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -30,6 +32,7 @@ env:
 
 jobs:
   iterate:
+    if: ${{ inputs.run_iteration == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -280,7 +283,7 @@ jobs:
         shell: bash
         run: |
           for attempt in 1 2 3; do
-            if gh workflow run inventory-autonomous-development.yml --ref main; then
+            if gh workflow run inventory-autonomous-development.yml --ref main -f run_iteration=true; then
               echo "Queued the next autonomous inventory iteration."
               exit 0
             fi
