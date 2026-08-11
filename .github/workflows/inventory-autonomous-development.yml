@@ -119,7 +119,9 @@ jobs:
           fi
 
       - name: Micro gate
+        id: micro_gate
         if: steps.repair_change.outputs.has_change == 'true'
+        continue-on-error: true
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
@@ -133,7 +135,9 @@ jobs:
             --output artifacts/micro.json
 
       - name: Canary gate
-        if: steps.repair_change.outputs.has_change == 'true'
+        id: canary_gate
+        if: steps.repair_change.outputs.has_change == 'true' && steps.micro_gate.outcome == 'success'
+        continue-on-error: true
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
@@ -147,7 +151,9 @@ jobs:
             --output artifacts/canary.json
 
       - name: Affected-cohort gate
-        if: steps.repair_change.outputs.has_change == 'true'
+        id: cohort_gate
+        if: steps.repair_change.outputs.has_change == 'true' && steps.micro_gate.outcome == 'success' && steps.canary_gate.outcome == 'success'
+        continue-on-error: true
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
@@ -162,7 +168,9 @@ jobs:
             --output artifacts/cohort.json
 
       - name: Full 44-paper regression gate
-        if: steps.repair_change.outputs.has_change == 'true'
+        id: full_gate
+        if: steps.repair_change.outputs.has_change == 'true' && steps.micro_gate.outcome == 'success' && steps.canary_gate.outcome == 'success' && steps.cohort_gate.outcome == 'success'
+        continue-on-error: true
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
@@ -175,8 +183,15 @@ jobs:
             --max-estimated-cost-usd 1.50 \
             --output artifacts/full_regression.json
 
+      - name: Report rejected repair
+        if: always() && steps.repair_change.outputs.has_change == 'true' && (steps.micro_gate.outcome == 'failure' || steps.canary_gate.outcome == 'failure' || steps.cohort_gate.outcome == 'failure' || steps.full_gate.outcome == 'failure')
+        shell: bash
+        run: |
+          echo "::notice::Candidate repair was safely rejected by the corpus gates; no code will be committed."
+          echo "micro=${{ steps.micro_gate.outcome }} canary=${{ steps.canary_gate.outcome }} cohort=${{ steps.cohort_gate.outcome }} full=${{ steps.full_gate.outcome }}"
+
       - name: Commit accepted development repair
-        if: steps.repair_change.outputs.has_change == 'true'
+        if: steps.repair_change.outputs.has_change == 'true' && steps.full_gate.outcome == 'success'
         shell: bash
         run: |
           git config user.name "ai-lca-autonomous-development"
@@ -187,7 +202,7 @@ jobs:
           git push origin HEAD:inventory-recall-development
 
       - name: Open or update draft promotion PR
-        if: steps.repair_change.outputs.has_change == 'true'
+        if: steps.repair_change.outputs.has_change == 'true' && steps.full_gate.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
