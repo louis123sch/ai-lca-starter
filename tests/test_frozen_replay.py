@@ -62,3 +62,9 @@ def test_frozen_structure_mixin_refuses_missing_structure(tmp_path):
 def test_both_ab_processors_resolve_structure_to_freeze_mixin():
     assert frozen_replay.FrozenControlProcessor._structure is frozen_replay.FrozenStructureMixin._structure
     assert frozen_replay.FrozenRoutedProcessor._structure is frozen_replay.FrozenStructureMixin._structure
+
+
+def test_fair_ab_calls_per_paper_raises_local_ceiling_but_keeps_run_cap():
+    assert frozen_replay.fair_ab_calls_per_paper(10, 60) == 20
+    assert frozen_replay.fair_ab_calls_per_paper(25, 60) == 25
+    assert frozen_replay.fair_ab_calls_per_paper(10, 12) == 12
