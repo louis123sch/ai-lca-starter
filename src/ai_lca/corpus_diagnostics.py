@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-BASELINE_MANIFEST = Path("benchmarks/corpus_baseline_v1_2026-08-11/papers.json")
+BASELINE_MANIFEST = Path("benchmarks/corpus_baseline_v1_1_2026-08-11/selection.json")
 
 
 def _read_json(path: Path, default: Any = None) -> Any:
@@ -14,6 +15,44 @@ def _read_json(path: Path, default: Any = None) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return default
+
+
+def load_baseline_papers(
+    state_dir: Path, manifest_path: Path = BASELINE_MANIFEST
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Load the exact frozen development cohort, preferring SQLite over hand-built manifests."""
+    manifest = _read_json(manifest_path, {}) or {}
+    if manifest.get("papers"):
+        return manifest.get("baseline_id"), list(manifest["papers"])
+
+    db_path = state_dir / str(manifest.get("sqlite_file") or "phase1.sqlite3")
+    if not db_path.exists():
+        raise FileNotFoundError(f"Frozen corpus database not found: {db_path}")
+    query = manifest.get("selection_sql") or (
+        "SELECT doi,title,status,source_hash,paper_dir,last_error FROM papers "
+        "WHERE status IN ('COMPLETE','UNRESOLVED_INVENTORY') ORDER BY status, doi"
+    )
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        papers = [dict(row) for row in conn.execute(query).fetchall()]
+    finally:
+        conn.close()
+
+    counts = Counter(str(p["status"]) for p in papers)
+    expected_counts = manifest.get("expected_status_counts") or {}
+    expected_total = manifest.get("expected_total")
+    if expected_total is not None and len(papers) != int(expected_total):
+        raise ValueError(
+            f"Frozen corpus count drift: expected {expected_total}, found {len(papers)}"
+        )
+    for status, expected in expected_counts.items():
+        if counts.get(status, 0) != int(expected):
+            raise ValueError(
+                f"Frozen corpus status drift for {status}: expected {expected}, "
+                f"found {counts.get(status, 0)}"
+            )
+    return manifest.get("baseline_id"), papers
 
 
 def _paper_root(state_dir: Path, paper: dict[str, Any]) -> Path:
@@ -40,13 +79,11 @@ def _failure_classes(
     amount_cov = float(qc.get("amount_coverage") or 0.0)
     unit_cov = float(qc.get("unit_coverage") or 0.0)
     process_count = int(qc.get("process_count") or 0)
-
     table_rows = sum(1 for c in candidates if c.get("evidence_type") == "table_row")
     table_share = table_rows / len(candidates) if candidates else 0.0
     multi_assigned = sum(1 for a in assignments if len(set(a.get("process_ids") or [])) > 1)
     duplicate_process_refs = sum(
-        1
-        for a in assignments
+        1 for a in assignments
         if len(a.get("process_ids") or []) != len(set(a.get("process_ids") or []))
     )
 
@@ -58,7 +95,7 @@ def _failure_classes(
         classes.add("FLOW_REVIEW_AMBIGUITY")
     if modeled_count and flow_count / max(1, modeled_count) < 0.5:
         classes.add("SPARSE_FLOW_EXTRACTION")
-    if coverage < 0.95:
+    if modeled_count and coverage < 0.95:
         classes.add("INCOMPLETE_CANDIDATE_REVIEW")
     if table_share >= 0.5 and unresolved:
         classes.add("TABLE_HEAVY_UNRESOLVED")
@@ -85,8 +122,7 @@ def analyze(
     state_dir: Path,
     manifest_path: Path = BASELINE_MANIFEST,
 ) -> dict[str, Any]:
-    manifest = _read_json(manifest_path, {}) or {}
-    papers = manifest.get("papers") or []
+    baseline_id, papers = load_baseline_papers(state_dir, manifest_path)
     rows: list[dict[str, Any]] = []
     class_papers: dict[str, list[str]] = defaultdict(list)
 
@@ -105,8 +141,7 @@ def analyze(
         evidence_counts = Counter(c.get("evidence_type") or "unknown" for c in candidates)
         multi = sum(1 for a in assignments if len(set(a.get("process_ids") or [])) > 1)
         duplicates = sum(
-            1
-            for a in assignments
+            1 for a in assignments
             if len(a.get("process_ids") or []) != len(set(a.get("process_ids") or []))
         )
         row = {
@@ -117,9 +152,7 @@ def analyze(
             "candidate_count": int(qc.get("candidate_count") or len(candidates)),
             "modeled_candidate_count": int(qc.get("modeled_candidate_count") or 0),
             "candidate_coverage": float(qc.get("candidate_coverage") or 0.0),
-            "ambiguous_or_missing_candidate_count": int(
-                qc.get("ambiguous_or_missing_candidate_count") or 0
-            ),
+            "ambiguous_or_missing_candidate_count": int(qc.get("ambiguous_or_missing_candidate_count") or 0),
             "flow_count": int(qc.get("flow_count") or 0),
             "amount_coverage": float(qc.get("amount_coverage") or 0.0),
             "unit_coverage": float(qc.get("unit_coverage") or 0.0),
@@ -132,7 +165,6 @@ def analyze(
         for cls in classes:
             class_papers[cls].append(str(paper.get("doi")))
 
-    # Lower relative cost means the failure is more attractive to solve first.
     cost_weight = {
         "DUPLICATE_PROCESS_ASSIGNMENT": 0.25,
         "PROCESS_WITHOUT_ASSIGNED_CANDIDATES": 0.5,
@@ -152,55 +184,33 @@ def analyze(
     ranked = []
     for cls, dois in class_papers.items():
         cost = cost_weight.get(cls, 1.5)
-        ranked.append(
-            {
-                "failure_class": cls,
-                "affected_papers": len(set(dois)),
-                "estimated_relative_repair_cost": cost,
-                "priority_score": round(len(set(dois)) / cost, 3),
-                "dois": sorted(set(dois)),
-            }
-        )
-    ranked.sort(
-        key=lambda x: (-x["priority_score"], -x["affected_papers"], x["failure_class"])
-    )
+        ranked.append({
+            "failure_class": cls,
+            "affected_papers": len(set(dois)),
+            "estimated_relative_repair_cost": cost,
+            "priority_score": round(len(set(dois)) / cost, 3),
+            "dois": sorted(set(dois)),
+        })
+    ranked.sort(key=lambda x: (-x["priority_score"], -x["affected_papers"], x["failure_class"]))
 
     unresolved_rows = [r for r in rows if r["baseline_status"] == "UNRESOLVED_INVENTORY"]
     complete_rows = [r for r in rows if r["baseline_status"] == "COMPLETE"]
     canary: list[str] = []
     by_doi = {r["doi"]: r for r in rows}
-
     for group in ranked[:6]:
         representatives = [by_doi[d] for d in group["dois"] if d in by_doi]
-        representatives.sort(
-            key=lambda r: (
-                -r["ambiguous_or_missing_candidate_count"],
-                -r["candidate_count"],
-                r["doi"],
-            )
-        )
+        representatives.sort(key=lambda r: (-r["ambiguous_or_missing_candidate_count"], -r["candidate_count"], r["doi"]))
         if representatives:
             doi = representatives[0]["doi"]
             if doi not in canary:
                 canary.append(doi)
-
     complete_rows.sort(key=lambda r: (-r["candidate_count"], -r["process_count"], r["doi"]))
     for row in complete_rows:
-        complete_in_canary = sum(
-            1 for doi in canary if by_doi[doi]["baseline_status"] == "COMPLETE"
-        )
-        if complete_in_canary >= 2:
+        if sum(1 for doi in canary if by_doi[doi]["baseline_status"] == "COMPLETE") >= 2:
             break
         if row["doi"] not in canary:
             canary.append(row["doi"])
-
-    unresolved_rows.sort(
-        key=lambda r: (
-            -r["ambiguous_or_missing_candidate_count"],
-            -r["candidate_count"],
-            r["doi"],
-        )
-    )
+    unresolved_rows.sort(key=lambda r: (-r["ambiguous_or_missing_candidate_count"], -r["candidate_count"], r["doi"]))
     for row in unresolved_rows:
         if len(canary) >= 8:
             break
@@ -208,7 +218,7 @@ def analyze(
             canary.append(row["doi"])
 
     return {
-        "baseline_id": manifest.get("baseline_id"),
+        "baseline_id": baseline_id,
         "state_dir": str(state_dir),
         "paper_count": len(rows),
         "status_counts": dict(Counter(r["baseline_status"] for r in rows)),
@@ -219,30 +229,15 @@ def analyze(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Zero-token diagnostics for the frozen AI-LCA development corpus."
-    )
+    parser = argparse.ArgumentParser(description="Zero-token diagnostics for the frozen AI-LCA development corpus.")
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, default=BASELINE_MANIFEST)
-    parser.add_argument(
-        "--output", type=Path, default=Path("artifacts/corpus_diagnostics.json")
-    )
+    parser.add_argument("--output", type=Path, default=Path("artifacts/corpus_diagnostics.json"))
     args = parser.parse_args()
     report = analyze(args.state_dir, args.manifest)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    summary = {
-        key: report[key]
-        for key in (
-            "baseline_id",
-            "paper_count",
-            "status_counts",
-            "failure_class_ranking",
-            "recommended_canary_dois",
-        )
-    }
+    args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    summary = {key: report[key] for key in ("baseline_id", "paper_count", "status_counts", "failure_class_ranking", "recommended_canary_dois")}
     print(json.dumps(summary, indent=2))
 
 
