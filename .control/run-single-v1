@@ -2,4 +2,5 @@ Controlled iteration v1 single-paper trigger.
 
 Scope: one frozen baseline paper only.
 No autonomous continuation is permitted.
-Retry after deterministic scope-detector fix.
+Target: final LCIA result rows surviving as foreground flows.
+Harness: direct assignment-stage review only; non-target baseline rows frozen.
