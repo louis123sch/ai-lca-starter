@@ -22,6 +22,9 @@ Rules:
 9. linked_process_id is only for an explicit exchange between two already locked foreground process IDs; otherwise null.
 10. Precision is more important than speculative completion: if it is unclear whether an item is modeled foreground inventory, omit it and record the ambiguity as a warning.
 11. A broad component, assembly, stack/BoP group, or equipment heading does NOT represent distinct explicit material or subcomponent inventory rows listed beneath or alongside it. When the source gives both a higher-level component label and separate modeled material/subcomponent rows, audit the separate rows individually and return any that are missing. Do not stop at the higher-level label merely because it is already present in the initial extraction.
+12. When a machine-readable inventory row contains both a background dataset field and a component/application field, treat the dataset field as evidence of the material or service used and the component field as its application context. Do not return the component heading itself as the missing flow when the row actually quantifies a material or service used by that component.
+13. For such rows, express the missing foreground flow in plain source-supported material/service terms, using the component/application text only to disambiguate where the same material occurs in multiple components. Do not copy market/geography/APOS or other background-dataset qualifiers into the foreground flow name.
+14. This completeness audit supplements missing modeled INPUTS from inventory lists. Do not add reference-product outputs, coproduct outputs, internal foreground-unit references, or background transport-dataset labels merely because they appear in an operation/workbook sheet; those remain the responsibility of the initial extraction unless they are explicitly part of the locked foreground inventory definition.
 """
 
 
