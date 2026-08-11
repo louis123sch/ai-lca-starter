@@ -128,10 +128,10 @@ jobs:
             --state-dir current_control_canary_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset canary \
-            --max-total-calls 60 \
-            --max-calls-per-paper 10 \
-            --max-total-tokens 1000000 \
-            --max-estimated-cost-usd 0.75 \
+            --max-total-calls 100 \
+            --max-calls-per-paper 20 \
+            --max-total-tokens 1500000 \
+            --max-estimated-cost-usd 1.00 \
             --output artifacts/current_control_canary.json 2>&1 | tee artifacts/current_control_canary.log
 
       - name: Run current frozen retrieval canary
@@ -145,10 +145,10 @@ jobs:
             --state-dir current_routed_canary_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset canary \
-            --max-total-calls 60 \
-            --max-calls-per-paper 10 \
-            --max-total-tokens 1000000 \
-            --max-estimated-cost-usd 0.75 \
+            --max-total-calls 100 \
+            --max-calls-per-paper 20 \
+            --max-total-tokens 1500000 \
+            --max-estimated-cost-usd 1.00 \
             --output artifacts/current_routed_canary.json 2>&1 | tee artifacts/current_routed_canary.log
 
       - name: Gate current retrieval against canary control
@@ -181,10 +181,10 @@ jobs:
             --state-dir current_control_full_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset full \
-            --max-total-calls 220 \
-            --max-calls-per-paper 10 \
-            --max-total-tokens 4000000 \
-            --max-estimated-cost-usd 3.00 \
+            --max-total-calls 320 \
+            --max-calls-per-paper 20 \
+            --max-total-tokens 5000000 \
+            --max-estimated-cost-usd 4.00 \
             --output artifacts/current_control_full.json
 
       - name: Run current frozen retrieval on all 44
@@ -197,10 +197,10 @@ jobs:
             --state-dir current_routed_full_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset full \
-            --max-total-calls 220 \
-            --max-calls-per-paper 10 \
-            --max-total-tokens 4000000 \
-            --max-estimated-cost-usd 3.00 \
+            --max-total-calls 320 \
+            --max-calls-per-paper 20 \
+            --max-total-tokens 5000000 \
+            --max-estimated-cost-usd 4.00 \
             --output artifacts/current_routed_full.json
 
       - name: Gate current retrieval against full control
@@ -216,44 +216,77 @@ jobs:
             --manifest artifacts/frozen_replay_manifest.json \
             --output artifacts/current_full_comparison.json
 
-      - name: Decide whether a repair is needed
-        id: repair_needed
+      - name: Classify current A/B state
+        id: state
         env:
           CANARY_OUTCOME: ${{ steps.current_canary_gate.outcome }}
           FULL_OUTCOME: ${{ steps.current_full_gate.outcome }}
         shell: bash
         run: |
-          if [ "$CANARY_OUTCOME" = "success" ] && [ "$FULL_OUTCOME" = "success" ]; then
-            echo "value=false" >> "$GITHUB_OUTPUT"
-            echo "Current retrieval architecture passed canary and full 44-paper A/B; autonomous search stops for human promotion."
-          else
-            echo "value=true" >> "$GITHUB_OUTPUT"
-          fi
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Enforce autonomous rejection cap
-        if: steps.repair_needed.outputs.value == 'true'
-        id: rejection_cap
+          def load(path):
+              p = Path(path)
+              if not p.exists():
+                  return {}
+              try:
+                  return json.loads(p.read_text(encoding='utf-8'))
+              except json.JSONDecodeError:
+                  return {}
+
+          canary = load('artifacts/current_canary_comparison.json')
+          full = load('artifacts/current_full_comparison.json')
+          if canary.get('failure_mode') == 'benchmark_incomplete':
+              print('benchmark_valid=false')
+              print('repair_needed=false')
+              print('passed=false')
+          elif os.environ.get('CANARY_OUTCOME') == 'success' and os.environ.get('FULL_OUTCOME') == 'success':
+              print('benchmark_valid=true')
+              print('repair_needed=false')
+              print('passed=true')
+          elif full.get('failure_mode') == 'benchmark_incomplete':
+              print('benchmark_valid=false')
+              print('repair_needed=false')
+              print('passed=false')
+          else:
+              print('benchmark_valid=true')
+              print('repair_needed=true')
+              print('passed=false')
+          PY
+
+      - name: Enforce autonomous search caps
+        if: steps.state.outputs.repair_needed == 'true'
+        id: caps
         shell: bash
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           from pathlib import Path
+
           path = Path('.autonomy/retrieval_rejection_history.jsonl')
-          count = 0
+          scientific = 0
+          proposal = 0
           if path.exists():
               for raw in path.read_text(encoding='utf-8').splitlines():
                   try:
                       row = json.loads(raw)
                   except json.JSONDecodeError:
                       continue
-                  if row.get('failure_class') == 'RETRIEVAL_BEFORE_REASONING':
-                      count += 1
-          print(f'count={count}')
-          print('allow=' + ('true' if count < 20 else 'false'))
+                  if row.get('failure_class') == 'RETRIEVAL_BEFORE_REASONING' and row.get('rejected_at_gate') in {'canary', 'full'}:
+                      scientific += 1
+                  elif row.get('failure_class') == 'RETRIEVAL_PROPOSAL_FAILURE':
+                      proposal += 1
+          print(f'scientific_count={scientific}')
+          print(f'proposal_count={proposal}')
+          print('allow_scientific=' + ('true' if scientific < 20 else 'false'))
+          print('allow_proposal=' + ('true' if proposal < 5 else 'false'))
           PY
 
       - name: Build aggregate retrieval diagnostics
-        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true'
+        if: steps.state.outputs.repair_needed == 'true' && steps.caps.outputs.allow_scientific == 'true' && steps.caps.outputs.allow_proposal == 'true'
         env:
           CONTROL_OUTCOME: ${{ steps.current_control_canary.outcome }}
           ROUTED_OUTCOME: ${{ steps.current_routed_canary.outcome }}
@@ -308,8 +341,8 @@ jobs:
           )
           PY
 
-      - name: Propose one bounded retrieval repair
-        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true'
+      - name: Propose one diagnostic-driven retrieval repair
+        if: steps.state.outputs.repair_needed == 'true' && steps.caps.outputs.allow_scientific == 'true' && steps.caps.outputs.allow_proposal == 'true'
         id: proposal
         continue-on-error: true
         run: |
@@ -324,7 +357,7 @@ jobs:
             --output-dir artifacts/retrieval_autonomous_iteration
 
       - name: Detect proposed retrieval code change
-        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true'
+        if: steps.state.outputs.repair_needed == 'true' && steps.caps.outputs.allow_scientific == 'true' && steps.caps.outputs.allow_proposal == 'true'
         id: repair_change
         shell: bash
         run: |
@@ -358,10 +391,10 @@ jobs:
             --state-dir patched_control_canary_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset canary \
-            --max-total-calls 60 \
-            --max-calls-per-paper 10 \
-            --max-total-tokens 1000000 \
-            --max-estimated-cost-usd 0.75 \
+            --max-total-calls 100 \
+            --max-calls-per-paper 20 \
+            --max-total-tokens 1500000 \
+            --max-estimated-cost-usd 1.00 \
             --output artifacts/patched_control_canary.json
 
       - name: Run patched frozen retrieval canary
@@ -374,10 +407,10 @@ jobs:
             --state-dir patched_routed_canary_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset canary \
-            --max-total-calls 60 \
-            --max-calls-per-paper 10 \
-            --max-total-tokens 1000000 \
-            --max-estimated-cost-usd 0.75 \
+            --max-total-calls 100 \
+            --max-calls-per-paper 20 \
+            --max-total-tokens 1500000 \
+            --max-estimated-cost-usd 1.00 \
             --output artifacts/patched_routed_canary.json
 
       - name: Gate patched retrieval against canary control
@@ -409,10 +442,10 @@ jobs:
             --state-dir patched_control_full_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset full \
-            --max-total-calls 220 \
-            --max-calls-per-paper 10 \
-            --max-total-tokens 4000000 \
-            --max-estimated-cost-usd 3.00 \
+            --max-total-calls 320 \
+            --max-calls-per-paper 20 \
+            --max-total-tokens 5000000 \
+            --max-estimated-cost-usd 4.00 \
             --output artifacts/patched_control_full.json
 
       - name: Run patched frozen retrieval on all 44
@@ -425,10 +458,10 @@ jobs:
             --state-dir patched_routed_full_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset full \
-            --max-total-calls 220 \
-            --max-calls-per-paper 10 \
-            --max-total-tokens 4000000 \
-            --max-estimated-cost-usd 3.00 \
+            --max-total-calls 320 \
+            --max-calls-per-paper 20 \
+            --max-total-tokens 5000000 \
+            --max-estimated-cost-usd 4.00 \
             --output artifacts/patched_routed_full.json
 
       - name: Gate patched retrieval against full control
@@ -464,9 +497,10 @@ jobs:
           git push origin HEAD:agent/retrieval-before-reasoning-clean
 
       - name: Record rejected retrieval experiment
-        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true' && !(steps.repair_change.outputs.has_change == 'true' && steps.patched_full_gate.outcome == 'success')
+        if: steps.state.outputs.repair_needed == 'true' && steps.caps.outputs.allow_scientific == 'true' && steps.caps.outputs.allow_proposal == 'true' && !(steps.repair_change.outputs.has_change == 'true' && steps.patched_full_gate.outcome == 'success')
         env:
           PROPOSAL_OUTCOME: ${{ steps.proposal.outcome }}
+          HAS_CHANGE: ${{ steps.repair_change.outputs.has_change }}
           PATCHED_CANARY_OUTCOME: ${{ steps.patched_canary_gate.outcome }}
           PATCHED_FULL_OUTCOME: ${{ steps.patched_full_gate.outcome }}
           RUN_ID: ${{ github.run_id }}
@@ -487,7 +521,22 @@ jobs:
                   return {}
 
           iteration = load('artifacts/retrieval_autonomous_iteration/iteration.json')
-          comparison = load('artifacts/patched_full_comparison.json') or load('artifacts/patched_canary_comparison.json') or load('artifacts/current_canary_comparison.json')
+          has_change = os.environ.get('HAS_CHANGE') == 'true'
+          canary_failed = os.environ.get('PATCHED_CANARY_OUTCOME') == 'failure'
+          full_failed = os.environ.get('PATCHED_FULL_OUTCOME') == 'failure'
+          if has_change and full_failed:
+              rejected_at = 'full'
+              failure_class = 'RETRIEVAL_BEFORE_REASONING'
+              comparison = load('artifacts/patched_full_comparison.json')
+          elif has_change and canary_failed:
+              rejected_at = 'canary'
+              failure_class = 'RETRIEVAL_BEFORE_REASONING'
+              comparison = load('artifacts/patched_canary_comparison.json')
+          else:
+              rejected_at = 'proposal'
+              failure_class = iteration.get('failure_class') or 'RETRIEVAL_PROPOSAL_FAILURE'
+              comparison = load('artifacts/current_canary_comparison.json')
+
           reasons = []
           for regression in comparison.get('regressions', []) or []:
               reasons.extend(regression.get('reasons') or ([regression.get('reason')] if regression.get('reason') else []))
@@ -497,12 +546,14 @@ jobs:
                   f"patched_canary={os.environ.get('PATCHED_CANARY_OUTCOME')}",
                   f"patched_full={os.environ.get('PATCHED_FULL_OUTCOME')}",
               ]
+
           record = {
               'run_id': os.environ.get('RUN_ID'),
-              'failure_class': 'RETRIEVAL_BEFORE_REASONING',
+              'failure_class': failure_class,
               'summary': iteration.get('summary') or 'No accepted bounded retrieval repair',
               'rationale': iteration.get('rationale') or 'The proposal or corpus gates did not yield an acceptable retrieval improvement.',
-              'rejected_at_gate': 'full' if os.environ.get('PATCHED_FULL_OUTCOME') == 'failure' else ('canary' if os.environ.get('PATCHED_CANARY_OUTCOME') == 'failure' else 'proposal'),
+              'hypothesis': iteration.get('hypothesis'),
+              'rejected_at_gate': rejected_at,
               'regression_reasons': sorted(set(str(x) for x in reasons if x)),
           }
           history = Path('.autonomy/retrieval_rejection_history.jsonl')
@@ -526,17 +577,32 @@ jobs:
           git push origin HEAD:agent/retrieval-before-reasoning-clean
 
       - name: Explicitly dispatch next retrieval iteration
-        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true'
+        if: steps.state.outputs.repair_needed == 'true' && steps.caps.outputs.allow_scientific == 'true' && steps.caps.outputs.allow_proposal == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run retrieval-before-reasoning-experiment.yml \
             --ref agent/retrieval-before-reasoning-clean
 
-      - name: Stop after rejection cap
-        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'false'
+      - name: Stop for invalid benchmark
+        if: steps.state.outputs.benchmark_valid == 'false'
         run: |
-          echo "::warning::Autonomous retrieval search stopped after 20 rejected experiments. Human review is required before spending more API budget."
+          echo "::error::Frozen A/B is incomplete because an arm hit an execution/budget/infrastructure stop. No retrieval code repair was attempted; fix benchmark execution before resuming optimisation."
+
+      - name: Stop after scientific rejection cap
+        if: steps.state.outputs.repair_needed == 'true' && steps.caps.outputs.allow_scientific == 'false'
+        run: |
+          echo "::warning::Autonomous retrieval search stopped after 20 corpus-tested rejected hypotheses. Human review is required before spending more API budget."
+
+      - name: Stop after proposal failure cap
+        if: steps.state.outputs.repair_needed == 'true' && steps.caps.outputs.allow_proposal == 'false'
+        run: |
+          echo "::warning::Autonomous retrieval search stopped after 5 proposal-generation failures under the new optimiser. Human review of diagnostic sufficiency is required."
+
+      - name: Report promotion-ready state
+        if: steps.state.outputs.passed == 'true'
+        run: |
+          echo "Current retrieval architecture passed canary and the full 44-paper frozen A/B. Autonomous search stops for human promotion/merge review."
 
       - name: Upload iteration evidence
         if: always()
