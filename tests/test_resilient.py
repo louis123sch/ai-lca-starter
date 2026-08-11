@@ -1,5 +1,12 @@
 from ai_lca.models import InventoryFlow, SourceEvidence
-from ai_lca.resilient import _bounded_chunks, _looks_inventory_dense, merge_supported_flows
+from ai_lca.resilient import (
+    _bounded_chunks,
+    _canonical_locked_process_id,
+    _enforce_locked_flow_attachments,
+    _looks_inventory_dense,
+    merge_supported_flows,
+)
+from types import SimpleNamespace
 
 
 def flow(name: str, *, amount=None, unit=None, evidence="listed"):
@@ -97,3 +104,40 @@ def test_merge_treats_incl_parenthetical_as_explanatory_duplicate():
         [flow("diaphragm compressor (incl. frequency converter)", amount=100, unit="kg")],
     )
     assert len(merged) == 1
+
+
+def _structure_for_attachment_tests():
+    return SimpleNamespace(
+        processes=[SimpleNamespace(process_id="P1"), SimpleNamespace(process_id="P2")],
+        candidate_activities=[
+            SimpleNamespace(candidate_id="P1", parent_candidate_id=None),
+            SimpleNamespace(candidate_id="P1_bop", parent_candidate_id="P1"),
+            SimpleNamespace(candidate_id="P1_stack", parent_candidate_id="P1"),
+            SimpleNamespace(candidate_id="shared_transport", parent_candidate_id=None),
+        ],
+    )
+
+
+def test_internal_stage_flow_attachment_resolves_to_locked_parent():
+    structure = _structure_for_attachment_tests()
+    assert _canonical_locked_process_id("P1_bop", structure) == "P1"
+    fixed = _enforce_locked_flow_attachments(
+        [flow("pump").model_copy(update={"process_id": "P1_bop"})], structure
+    )
+    assert len(fixed) == 1
+    assert fixed[0].process_id == "P1"
+
+
+def test_non_locked_candidate_without_locked_ancestry_is_rejected():
+    structure = _structure_for_attachment_tests()
+    fixed = _enforce_locked_flow_attachments(
+        [flow("transport").model_copy(update={"process_id": "shared_transport"})], structure
+    )
+    assert fixed == []
+
+
+def test_locked_flow_attachment_is_unchanged():
+    structure = _structure_for_attachment_tests()
+    fixed = _enforce_locked_flow_attachments([flow("electricity")], structure)
+    assert len(fixed) == 1
+    assert fixed[0].process_id == "P1"

@@ -220,6 +220,45 @@ def _locked_structure(extraction: InventoryExtraction) -> ForegroundStructure:
     )
 
 
+def _canonical_locked_process_id(process_id: str, structure: ForegroundStructure) -> str | None:
+    """Resolve a flow attachment to the locked graph without creating subprocesses.
+
+    Structured-output models can occasionally return an internal candidate ID even though
+    the prompt supplies only locked process IDs. Internal stages are bookkeeping children of
+    a retained process, so their flows belong on the nearest locked ancestor. Candidates with
+    no locked ancestry are not valid flow attachments and are rejected.
+    """
+    locked_ids = {process.process_id for process in structure.processes}
+    if process_id in locked_ids:
+        return process_id
+
+    candidates = {candidate.candidate_id: candidate for candidate in structure.candidate_activities}
+    current = candidates.get(process_id)
+    seen: set[str] = set()
+    while current is not None and current.candidate_id not in seen:
+        seen.add(current.candidate_id)
+        parent_id = current.parent_candidate_id
+        if parent_id in locked_ids:
+            return parent_id
+        current = candidates.get(parent_id) if parent_id else None
+    return None
+
+
+def _enforce_locked_flow_attachments(
+    flows: Iterable[InventoryFlow], structure: ForegroundStructure
+) -> list[InventoryFlow]:
+    """Keep flows on the locked foreground graph and collapse internal-stage attachments upward."""
+    enforced: list[InventoryFlow] = []
+    for flow in flows:
+        process_id = _canonical_locked_process_id(flow.process_id, structure)
+        if process_id is None:
+            continue
+        if process_id != flow.process_id:
+            flow = flow.model_copy(update={"process_id": process_id})
+        enforced.append(flow)
+    return enforced
+
+
 def _recover_chunk_flows(
     chunk: str,
     structure: ForegroundStructure,
@@ -299,7 +338,9 @@ def extract_inventory_from_documents_resilient(
         recovered.extend(result.flows)
         recovery_warnings.extend(result.assumptions_or_warnings)
 
-    merged = merge_supported_flows(base.flows, recovered)
+    base_flows = _enforce_locked_flow_attachments(base.flows, structure)
+    recovered_flows = _enforce_locked_flow_attachments(recovered, structure)
+    merged = merge_supported_flows(base_flows, recovered_flows)
     warnings = list(
         dict.fromkeys(
             base.assumptions_or_warnings
