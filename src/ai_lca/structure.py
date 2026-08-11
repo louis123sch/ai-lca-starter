@@ -32,21 +32,24 @@ def lock_foreground_interpretation(
             continue
         by_id[candidate_id] = candidate
 
-    # An assessed product system is a top-level alternative by definition. A nested,
-    # independently modelled foreground activity must use interconnected_foreground_process.
-    # This prevents scenario/configuration variants from becoming child processes merely
-    # because a model labels them as additional assessed systems.
-    suppressed_child_assessed_ids = {
-        candidate_id
-        for candidate_id, candidate in by_id.items()
-        if candidate.role == "assessed_product_system" and candidate.parent_candidate_id
-    }
+    # Assessed product systems are top-level alternatives. If one is parented directly to
+    # another lockable foreground candidate, retain it only as a candidate rather than
+    # promoting a scenario/configuration variant to a child process. A genuinely nested,
+    # independently modelled activity uses interconnected_foreground_process instead.
+    suppressed_child_assessed_ids = set()
+    for candidate_id, candidate in by_id.items():
+        if candidate.role != "assessed_product_system" or not candidate.parent_candidate_id:
+            continue
+        parent = by_id.get(candidate.parent_candidate_id.strip())
+        if parent is not None and parent.role in LOCKED_PROCESS_ROLES:
+            suppressed_child_assessed_ids.add(candidate_id)
+
     for candidate_id in suppressed_child_assessed_ids:
         candidate = by_id[candidate_id]
         warnings.append(
-            f"Candidate {candidate.name!r} was classified as an assessed product system but also had "
-            "a parent; retained it as a candidate only. Nested foreground activities require the "
-            "interconnected_foreground_process role."
+            f"Candidate {candidate.name!r} was classified as an assessed product system beneath another "
+            "foreground candidate; retained it as a candidate only. Nested foreground activities require "
+            "the interconnected_foreground_process role."
         )
 
     accepted_ids = {
