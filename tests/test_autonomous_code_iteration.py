@@ -77,6 +77,23 @@ def test_repair_bare_hunk_header_from_unique_source_context(tmp_path) -> None:
     assert "@@ -1,3 +1,3 @@" in repaired
 
 
+def test_repair_numbered_hunk_with_wrong_location_from_unique_context(tmp_path) -> None:
+    source = tmp_path / "src" / "ai_lca" / "example.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("zero\none\ntwo\nthree\n", encoding="utf-8")
+    diff = """--- a/src/ai_lca/example.py
++++ b/src/ai_lca/example.py
+@@ -99,3 +99,3 @@
+ one
+-two
++TWO
+ three
+"""
+    repaired = _repair_bare_hunk_headers(diff, root=tmp_path)
+    assert "@@ -2,3 +2,3 @@" in repaired
+    assert "@@ -99,3 +99,3 @@" not in repaired
+
+
 def test_repair_bare_hunk_rejects_ambiguous_context(tmp_path) -> None:
     source = tmp_path / "src" / "ai_lca" / "example.py"
     source.parent.mkdir(parents=True)
