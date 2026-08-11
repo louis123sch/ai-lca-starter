@@ -15,6 +15,10 @@ def _read(path: Path, default: Any = None) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _normalise(value: str | None) -> str:
+    return " ".join((value or "").casefold().split())
+
+
 def _result_map(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {row["doi"]: row for row in report.get("results", []) if row.get("doi")}
 
@@ -24,7 +28,14 @@ def flow_candidate_ids(
     manifest: Path,
     dois: list[str],
 ) -> dict[str, set[str]]:
-    """Return candidate IDs that actually produced foreground flows in each state."""
+    """Return source candidate IDs represented by the final foreground inventory.
+
+    Replay validation can clean process results in memory without rewriting a process
+    JSON when no further model repair is required. Therefore candidate-level A/B
+    comparison uses the final `inventory.json` written from those in-memory results
+    and maps each flow's provenance back to deterministic candidate evidence. This
+    avoids reading stale baseline process files.
+    """
 
     _, papers = load_baseline_papers(state_dir, manifest)
     by_doi = {paper["doi"]: paper for paper in papers}
@@ -32,14 +43,30 @@ def flow_candidate_ids(
     for doi in dois:
         paper = by_doi.get(doi)
         found: set[str] = set()
-        if paper:
-            process_dir = _paper_dir(state_dir, paper) / "extraction" / "processes"
-            for path in process_dir.glob("*.json") if process_dir.exists() else []:
-                payload = _read(path, {}) or {}
-                for flow in payload.get("flows", []) or []:
-                    candidate_id = flow.get("candidate_id")
-                    if candidate_id:
-                        found.add(str(candidate_id))
+        if not paper:
+            result[doi] = found
+            continue
+
+        paper_dir = _paper_dir(state_dir, paper)
+        raw_candidates = _read(paper_dir / "extraction" / "inventory_candidates.json", []) or []
+        candidate_lookup: dict[tuple[str, str], set[str]] = {}
+        for candidate in raw_candidates:
+            key = (
+                _normalise(candidate.get("evidence_text")),
+                _normalise(candidate.get("table")),
+            )
+            candidate_id = candidate.get("candidate_id")
+            if candidate_id and key[0]:
+                candidate_lookup.setdefault(key, set()).add(str(candidate_id))
+
+        inventory = _read(paper_dir / "extraction" / "inventory.json", {}) or {}
+        for flow in inventory.get("flows", []) or []:
+            evidence = flow.get("evidence") or {}
+            key = (
+                _normalise(evidence.get("evidence_text")),
+                _normalise(evidence.get("table")),
+            )
+            found.update(candidate_lookup.get(key, set()))
         result[doi] = found
     return result
 
@@ -55,9 +82,9 @@ def compare_reports(
 
     Raw flow count is deliberately not a monotonic quality metric. A retrieval run
     may correctly remove LCIA result rows that the old pipeline had turned into
-    foreground flows. When state-level candidate IDs are available, every lost flow
-    candidate must be explicitly covered by the router's safe-exclusion set; loss of
-    any other flow candidate is a hard regression.
+    foreground flows. When candidate IDs are available, every lost flow candidate
+    must be explicitly covered by the router's safe-exclusion set; loss of any other
+    source-supported foreground-flow candidate is a hard regression.
     """
 
     control_rows = _result_map(control)
