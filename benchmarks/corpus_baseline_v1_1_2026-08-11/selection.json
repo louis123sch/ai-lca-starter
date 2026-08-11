@@ -1,0 +1,12 @@
+{
+  "baseline_id": "corpus_baseline_v1_1_2026-08-11",
+  "source_workflow_run_id": 31473783816,
+  "source_artifact_id": 9094408729,
+  "sqlite_file": "phase1.sqlite3",
+  "selection_sql": "SELECT doi,title,status,source_hash,paper_dir,last_error FROM papers WHERE status IN ('COMPLETE','UNRESOLVED_INVENTORY') ORDER BY status, doi",
+  "expected_status_counts": {
+    "UNRESOLVED_INVENTORY": 37,
+    "COMPLETE": 7
+  },
+  "expected_total": 44
+}
