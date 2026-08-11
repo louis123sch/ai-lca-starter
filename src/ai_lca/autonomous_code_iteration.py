@@ -71,6 +71,7 @@ FORBIDDEN_PATCH_PATTERNS = (
     r"lower.{0,20}(threshold|target)",
     r"disable.{0,20}(check|validation|gate)",
 )
+_NUMBERED_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
 SYSTEM_PROMPT = """You are a conservative software repair agent for an evidence-grounded life-cycle inventory extractor.
 Propose ONE small, general architectural improvement for the supplied recurring failure class.
 Scientific integrity constraints are absolute:
@@ -81,7 +82,7 @@ Scientific integrity constraints are absolute:
 - prefer deterministic parsing/validation and reuse of existing evidence over larger prompts;
 - preserve the role-classified foreground architecture;
 - optimize improvement per API token, not raw model usage.
-Return ONLY a valid git unified diff in unified_diff. It must use standard headers exactly like `--- a/<path>` and `+++ b/<path>` followed by `@@` hunks. Do not use Markdown fences, `*** Begin Patch`, prose, or custom patch syntax inside unified_diff. Touch ONLY allowed files, include tests for behavior changes, and keep the patch small enough to review and revert."""
+Return ONLY a valid git unified diff in unified_diff. It must use standard headers exactly like `--- a/<path>` and `+++ b/<path>` followed by numbered `@@ -old +new @@` hunks. Do not use Markdown fences, `*** Begin Patch`, prose, or custom patch syntax inside unified_diff. Touch ONLY allowed files, include tests for behavior changes, and keep the patch small enough to review and revert."""
 
 
 def _load(path: Path) -> Any:
@@ -116,10 +117,9 @@ def _normalise_header_path(raw: str, prefix: str) -> str:
 
 
 def _normalise_unified_diff(diff: str) -> str:
-    """Accept common model formatting variants but emit one git-applyable form."""
+    """Accept harmless model formatting variants while preserving patch semantics."""
     text = _strip_markdown_fence(diff)
     lines = text.splitlines()
-    # Ignore accidental prose before the first conventional patch header.
     first = next(
         (
             i
@@ -180,6 +180,110 @@ def _validate_patch(proposal: PatchProposal, allowed: set[str]) -> None:
             raise ValueError(f"proposal violates anti-overfitting policy: {pattern}")
 
 
+def _has_unnumbered_hunks(diff: str) -> bool:
+    return any(
+        line.startswith("@@") and not _NUMBERED_HUNK_RE.match(line)
+        for line in _normalise_unified_diff(diff).splitlines()
+    )
+
+
+def _decode_context_hunk_line(line: str, *, old: bool) -> str | None:
+    if line.startswith("\\ No newline at end of file"):
+        return None
+    if line.startswith("-"):
+        return line[1:] if old else None
+    if line.startswith("+"):
+        return None if old else line[1:]
+    if line.startswith(" "):
+        return line[1:]
+    if line == "":
+        return ""
+    raise ValueError(
+        "unnumbered context patch contains a line without a diff marker; refusing unsafe application"
+    )
+
+
+def _apply_exact_context_patch(diff: str) -> list[str]:
+    """Apply unnumbered model hunks only when their old context matches exactly once.
+
+    This is deliberately stricter than fuzzy patching. It supports the common LLM output
+    where file headers and +/- context are correct but hunk line ranges are omitted.
+    """
+    lines = _normalise_unified_diff(diff).splitlines()
+    changed: list[str] = []
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith("--- "):
+            i += 1
+            continue
+        old_header = lines[i][4:].strip()
+        if i + 1 >= len(lines) or not lines[i + 1].startswith("+++ "):
+            raise ValueError("context patch is missing a +++ file header")
+        new_header = lines[i + 1][4:].strip()
+        if old_header == "/dev/null" or new_header == "/dev/null":
+            raise ValueError("context fallback does not create or delete files")
+        old_path = old_header[2:] if old_header.startswith("a/") else old_header
+        new_path = new_header[2:] if new_header.startswith("b/") else new_header
+        if old_path != new_path:
+            raise ValueError("context fallback does not rename files")
+        path = Path(new_path)
+        if not path.is_file():
+            raise ValueError(f"context patch target does not exist: {new_path}")
+        content = path.read_text(encoding="utf-8")
+        i += 2
+        file_hunks = 0
+        while i < len(lines) and not lines[i].startswith("--- "):
+            if not lines[i].startswith("@@"):
+                i += 1
+                continue
+            header = lines[i]
+            if _NUMBERED_HUNK_RE.match(header):
+                raise ValueError(
+                    "mixed numbered and unnumbered hunks are not supported by exact-context fallback"
+                )
+            i += 1
+            hunk_lines: list[str] = []
+            while (
+                i < len(lines)
+                and not lines[i].startswith("@@")
+                and not lines[i].startswith("--- ")
+            ):
+                hunk_lines.append(lines[i])
+                i += 1
+            old_lines: list[str] = []
+            new_lines: list[str] = []
+            has_change = False
+            for line in hunk_lines:
+                if line.startswith(("-", "+")):
+                    has_change = True
+                old_line = _decode_context_hunk_line(line, old=True)
+                new_line = _decode_context_hunk_line(line, old=False)
+                if old_line is not None:
+                    old_lines.append(old_line)
+                if new_line is not None:
+                    new_lines.append(new_line)
+            if not has_change:
+                raise ValueError("context hunk contains no changed lines")
+            if not old_lines:
+                raise ValueError("context fallback requires an existing old block")
+            old_block = "\n".join(old_lines)
+            new_block = "\n".join(new_lines)
+            occurrences = content.count(old_block)
+            if occurrences != 1:
+                raise ValueError(
+                    f"context hunk for {new_path} matched {occurrences} times; expected exactly one"
+                )
+            content = content.replace(old_block, new_block, 1)
+            file_hunks += 1
+        if not file_hunks:
+            raise ValueError(f"context patch for {new_path} contained no hunks")
+        path.write_text(content, encoding="utf-8")
+        changed.append(new_path)
+    if not changed:
+        raise ValueError("context patch contained no applicable files")
+    return changed
+
+
 def _context(files: list[str], max_chars: int) -> str:
     chunks = []
     remaining = max_chars
@@ -208,7 +312,7 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
         f"PRIORITY SCORE: {target_row.get('priority_score')}\n"
         "Do not use or encode individual paper identities. The counts above are diagnostic only.\n\n"
         f"ALLOWED FILES: {json.dumps(allowed_files)}\n"
-        "Your unified_diff field must begin with `--- a/<path>` and `+++ b/<path>` and use standard `@@` hunks. Do not wrap it in Markdown.\n\n"
+        "Your unified_diff field must begin with `--- a/<path>` and `+++ b/<path>` and use numbered standard `@@ -old +new @@` hunks. Do not wrap it in Markdown.\n\n"
         "CURRENT CODE:\n"
         + _context(allowed_files, args.max_context_chars)
     )
@@ -227,7 +331,6 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
     meta_path = args.output_dir / "proposal.json"
     raw_patch_path = args.output_dir / "proposal.raw.patch"
     patch_path = args.output_dir / "proposal.patch"
-    # Persist raw model evidence before validation so rejected attempts remain auditable.
     meta_path.write_text(proposal.model_dump_json(indent=2) + "\n", encoding="utf-8")
     raw_patch_path.write_text(proposal.unified_diff.rstrip() + "\n", encoding="utf-8")
 
@@ -236,10 +339,15 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
     patch_path.write_text(normalised_diff, encoding="utf-8")
     _validate_patch(normalised, allowed)
 
+    application_mode = "git_apply"
     check = _run(["git", "apply", "--check", str(patch_path)], check=False)
-    if check.returncode:
+    if check.returncode == 0:
+        _run(["git", "apply", str(patch_path)])
+    elif _has_unnumbered_hunks(normalised_diff):
+        _apply_exact_context_patch(normalised_diff)
+        application_mode = "exact_context"
+    else:
         raise RuntimeError("git apply --check failed: " + check.stderr[-2000:])
-    _run(["git", "apply", str(patch_path)])
 
     tests = [
         "tests/test_jats.py",
@@ -265,6 +373,7 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
         "rationale": proposal.rationale,
         "allowed_files": allowed_files,
         "changed_paths": sorted(_changed_paths(normalised_diff)),
+        "application_mode": application_mode,
         "diff_stat": status,
         "deterministic_tests_passed": True,
     }
