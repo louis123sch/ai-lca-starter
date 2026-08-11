@@ -1,0 +1,64 @@
+name: Phase 1 literature-scale smoke
+
+on:
+  push:
+    branches: [phase1-literature-scale]
+    paths:
+      - "src/ai_lca/literature.py"
+      - "src/ai_lca/springer_oa.py"
+      - "tests/test_literature.py"
+      - ".github/workflows/literature-scale-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  test-discover-acquire:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      SPRINGER_API_KEY: ${{ secrets.SPRINGER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package
+        run: python -m pip install -e ".[test]"
+      - name: Run literature tests
+        run: python -m pytest -q tests/test_literature.py
+      - name: Verify Springer OA key is configured
+        run: |
+          if [ -z "$SPRINGER_API_KEY" ]; then
+            echo "::error::Repository secret SPRINGER_API_KEY is missing."
+            exit 2
+          fi
+      - name: Discover 50 recent IJLCA records without PDFs
+        run: >-
+          python -m ai_lca.literature
+          --from-year 2024
+          --until-year 2026
+          --max-records 50
+          --output-dir literature_runs/smoke
+      - name: Acquire machine-readable OA JATS for first 20 candidates
+        run: >-
+          python -m ai_lca.springer_oa
+          literature_runs/smoke/catalogue.csv
+          --max-attempts 20
+          --output-dir literature_runs/smoke/jats
+      - name: Show Phase 1 summary
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          catalogue = list(csv.DictReader(Path("literature_runs/smoke/catalogue.csv").open()))
+          manifest = list(csv.DictReader(Path("literature_runs/smoke/jats/manifest.csv").open()))
+          print(f"catalogue_records={len(catalogue)}")
+          print(f"jats_attempted={len(manifest)}")
+          print(f"jats_acquired={sum(r['status'] == 'acquired' for r in manifest)}")
+          print(f"jats_unavailable={sum(r['status'] == 'not_open_access_jats' for r in manifest)}")
+          print(f"jats_errors={sum(r['status'] == 'error' for r in manifest)}")
+          for r in manifest:
+              if r['status'] == 'acquired':
+                  print("ACQUIRED", r['doi'], r['bytes_written'])
+          PY
