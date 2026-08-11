@@ -1,0 +1,83 @@
+name: Paper reader controlled iteration
+
+on:
+  push:
+    branches: [agent/paper-reader-controlled-iteration-1]
+    paths:
+      - ".control/run-single-v1"
+      - ".control/run-canary-v1"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: paper-reader-controlled-iteration
+  cancel-in-progress: false
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENAI_MODEL: gpt-5-mini
+  OPENAI_SCREEN_MODEL: gpt-5-nano
+
+jobs:
+  controlled_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/paper-reader-controlled-iteration-1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install and preflight
+        run: |
+          python -m pip install -e ".[test]"
+          python -m compileall -q src tests
+          python -m pytest -q tests/test_controlled_accuracy.py
+      - name: Resolve explicit scope
+        id: scope
+        shell: bash
+        run: |
+          changed=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")
+          if grep -qx '.control/run-canary-v1' <<< "$changed"; then
+            echo "scope=canary" >> "$GITHUB_OUTPUT"
+          elif grep -qx '.control/run-single-v1' <<< "$changed"; then
+            echo "scope=single" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No controlled-run sentinel changed"; exit 2
+          fi
+      - name: Verify OpenAI secret
+        run: test -n "$OPENAI_API_KEY" || { echo "::error::OPENAI_API_KEY missing"; exit 2; }
+      - name: Download exact pre-PR15 frozen corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-scale-31473783816
+          path: frozen_corpus
+          repository: louis123sch/ai-lca-starter
+          run-id: 31473783816
+          github-token: ${{ github.token }}
+      - name: Zero-API diagnostic
+        run: |
+          mkdir -p artifacts
+          python -m ai_lca.controlled_accuracy diagnose --state-dir frozen_corpus --output artifacts/accuracy_diagnostics.json
+      - name: Isolate corpus copy
+        run: cp -a frozen_corpus experiment_state
+      - name: Run bounded assignment-only experiment
+        run: |
+          python -m ai_lca.controlled_accuracy run \
+            --state-dir experiment_state \
+            --scope "${{ steps.scope.outputs.scope }}" \
+            --max-total-calls 10 \
+            --max-total-tokens 200000 \
+            --max-estimated-cost-usd 0.10 \
+            --output artifacts/accuracy_iteration_v1.json
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-reader-controlled-${{ github.run_id }}
+          path: artifacts
+          retention-days: 30
