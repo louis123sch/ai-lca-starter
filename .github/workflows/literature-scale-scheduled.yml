@@ -1,16 +1,10 @@
-name: Scheduled Phase 1 literature scale batches
+name: Phase 1 literature scale (manual only)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/literature-scale-scheduled.yml"
-  schedule:
-    - cron: "17 * * * *"
   workflow_dispatch:
 
 concurrency:
-  group: phase1-autonomous-literature-scale
+  group: phase1-literature-scale-manual
   cancel-in-progress: false
 
 jobs:
@@ -27,10 +21,10 @@ jobs:
       OPENAI_SCREEN_MODEL: gpt-5-nano
       OPENAI_REQUEST_TIMEOUT_SECONDS: "180"
     steps:
-      - name: Check out Phase 1 branch
+      - name: Check out main
         uses: actions/checkout@v4
         with:
-          ref: phase1-literature-scale
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -52,7 +46,7 @@ jobs:
         run: |
           test -n "$SPRINGER_API_KEY" || { echo "::error::SPRINGER_API_KEY missing"; exit 2; }
           test -n "$OPENAI_API_KEY" || { echo "::error::OPENAI_API_KEY missing"; exit 2; }
-      - name: Process next bounded literature batch
+      - name: Process one bounded literature batch
         run: |
           python -m ai_lca.autonomous_literature \
             --mode scale \
