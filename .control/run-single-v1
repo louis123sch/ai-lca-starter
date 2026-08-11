@@ -2,3 +2,4 @@ Controlled iteration v1 single-paper trigger.
 
 Scope: one frozen baseline paper only.
 No autonomous continuation is permitted.
+Retry after deterministic scope-detector fix.
