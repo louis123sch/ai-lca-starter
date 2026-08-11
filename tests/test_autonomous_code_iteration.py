@@ -94,6 +94,26 @@ def test_repair_numbered_hunk_with_wrong_location_from_unique_context(tmp_path) 
     assert "@@ -99,3 +99,3 @@" not in repaired
 
 
+def test_repair_drops_context_only_noop_hunk(tmp_path) -> None:
+    source = tmp_path / "src" / "ai_lca" / "example.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    diff = """--- a/src/ai_lca/example.py
++++ b/src/ai_lca/example.py
+@@ -1,2 +1,2 @@
+-alpha
++ALPHA
+ beta
+@@ -3,1 +3,1 @@
+ gamma
+"""
+    repaired = _repair_bare_hunk_headers(diff, root=tmp_path)
+    assert "-alpha" in repaired
+    assert "+ALPHA" in repaired
+    assert repaired.count("@@") == 2
+    assert "@@ -3,1 +3,1 @@" not in repaired
+
+
 def test_repair_bare_hunk_rejects_ambiguous_context(tmp_path) -> None:
     source = tmp_path / "src" / "ai_lca" / "example.py"
     source.parent.mkdir(parents=True)
