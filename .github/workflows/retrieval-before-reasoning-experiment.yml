@@ -8,8 +8,10 @@ on:
       - "src/ai_lca/retrieval_processor.py"
       - "src/ai_lca/retrieval_replay.py"
       - "src/ai_lca/retrieval_compare.py"
+      - "src/ai_lca/frozen_replay.py"
       - "tests/test_evidence_router.py"
       - "tests/test_retrieval_compare.py"
+      - "tests/test_frozen_replay.py"
       - ".github/workflows/retrieval-before-reasoning-experiment.yml"
   workflow_dispatch:
 
@@ -89,11 +91,12 @@ jobs:
           cp -a frozen_corpus control_canary_state
           cp -a frozen_corpus routed_canary_state
 
-      - name: Run existing replay control on canary
+      - name: Run frozen-structure control on canary
         id: control_canary
         continue-on-error: true
         run: |
-          python -m ai_lca.inventory_replay \
+          python -m ai_lca.frozen_replay \
+            --mode control \
             --state-dir control_canary_state \
             --subset canary \
             --max-total-calls 30 \
@@ -102,11 +105,12 @@ jobs:
             --max-estimated-cost-usd 0.45 \
             --output artifacts/control_canary.json
 
-      - name: Run production-equivalent retrieval replay on identical canary
+      - name: Run frozen-structure retrieval on identical canary
         id: routed_canary
         continue-on-error: true
         run: |
-          python -m ai_lca.retrieval_replay \
+          python -m ai_lca.frozen_replay \
+            --mode routed \
             --state-dir routed_canary_state \
             --subset canary \
             --max-total-calls 30 \
@@ -131,12 +135,13 @@ jobs:
           cp -a frozen_corpus control_full_state
           cp -a frozen_corpus routed_full_state
 
-      - name: Run existing replay control on all 44 papers
+      - name: Run frozen-structure control on all 44 papers
         if: steps.canary_gate.outcome == 'success'
         id: control_full
         continue-on-error: true
         run: |
-          python -m ai_lca.inventory_replay \
+          python -m ai_lca.frozen_replay \
+            --mode control \
             --state-dir control_full_state \
             --subset full \
             --max-total-calls 110 \
@@ -145,12 +150,13 @@ jobs:
             --max-estimated-cost-usd 1.50 \
             --output artifacts/control_full.json
 
-      - name: Run production-equivalent retrieval replay on all 44 papers
+      - name: Run frozen-structure retrieval on all 44 papers
         if: steps.canary_gate.outcome == 'success'
         id: routed_full
         continue-on-error: true
         run: |
-          python -m ai_lca.retrieval_replay \
+          python -m ai_lca.frozen_replay \
+            --mode routed \
             --state-dir routed_full_state \
             --subset full \
             --max-total-calls 110 \
