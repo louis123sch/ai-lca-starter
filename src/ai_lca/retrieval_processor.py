@@ -4,17 +4,13 @@ import json
 
 from .autonomous_literature import (
     ASSIGN_SYSTEM_PROMPT,
-    STRUCTURE_REPAIR_SYSTEM_PROMPT,
     CandidateAssignment,
     CandidateAssignmentBatch,
-    ForegroundInterpretation,
-    ForegroundStructure,
     PaperProcessor,
     _job_key,
     _load_model,
     _validate_assignments,
     _write_json,
-    structure_gate,
 )
 from .evidence_router import (
     build_structure_evidence,
@@ -22,90 +18,34 @@ from .evidence_router import (
     route_inventory_candidates,
     routed_candidate_payload,
 )
-from .llm import STRUCTURE_SYSTEM_PROMPT
-from .structure import lock_foreground_interpretation
 
 
 class RetrievalPaperProcessor(PaperProcessor):
-    """Experimental retrieval-before-reasoning variant of the literature processor.
+    """High-recall retrieval-before-reasoning variant of the literature processor.
 
-    The deterministic JATS enumerator remains the source of truth. Retrieval only
-    reduces/ranks evidence before model reasoning; it cannot create candidates or
-    foreground processes.
+    The deterministic JATS enumerator remains the source of truth. In v1 the
+    trusted full-context structure stage is deliberately unchanged; retrieval is
+    enabled only for inventory-candidate reasoning. A bounded structure evidence
+    pack is still written for measurement so structure retrieval can be promoted
+    later if its frozen-corpus recall becomes adequate.
     """
 
     retrieval_structure_max_chars = 50_000
 
     def _structure(self, doi, source_hash, doc, paper_dir):  # noqa: ANN001
-        path = paper_dir / "extraction" / "structure_retrieval.json"
-        key = _job_key(
-            doi,
-            source_hash,
-            "structure_retrieval",
-            process_id=None,
-            model=self.config.core_model,
-            prompt_version="structure-retrieval-v1",
-        )
-        cached = self.store.completed_job_result(key)
-        if cached:
-            return _load_model(cached, ForegroundStructure)
-
-        self.store.start_job(key, doi, "structure_retrieval", model=self.config.core_model)
         pack = build_structure_evidence(
             doc,
             min(self.config.structure_max_chars, self.retrieval_structure_max_chars),
         )
         _write_json(
             paper_dir / "extraction" / "retrieval" / "structure_evidence_manifest.json",
-            pack.manifest(),
+            {
+                **pack.manifest(),
+                "enabled_for_reasoning": False,
+                "reason": "v1 retains full-context structure reasoning until retrieval recall is validated",
+            },
         )
-        text = pack.text
-        try:
-            interp = self.api.parse(
-                doi=doi,
-                stage="structure_retrieval",
-                model=self.config.core_model,
-                reasoning_effort=self.config.structure_reasoning,
-                system_prompt=STRUCTURE_SYSTEM_PROMPT,
-                user_prompt=(
-                    "Identify and classify process-like entities, study context, and source-supported "
-                    "reference products/units. Do not decide Brightway mappings. The evidence below was "
-                    "retrieved conservatively from the source; do not infer facts absent from it.\n\n"
-                    "RETRIEVED SOURCE MATERIAL:\n"
-                    + text
-                ),
-                response_format=ForegroundInterpretation,
-            )
-            structure = lock_foreground_interpretation(interp)
-            failures = structure_gate(structure, text)
-            if failures:
-                repair = self.api.parse(
-                    doi=doi,
-                    stage="structure_retrieval_repair",
-                    model=self.config.core_model,
-                    reasoning_effort=self.config.structure_reasoning,
-                    system_prompt=STRUCTURE_REPAIR_SYSTEM_PROMPT,
-                    user_prompt=(
-                        "FAILED CHECKS:\n- "
-                        + "\n- ".join(failures)
-                        + "\n\nCURRENT INTERPRETATION:\n"
-                        + structure.model_dump_json(indent=2)
-                        + "\n\nRETRIEVED SOURCE MATERIAL:\n"
-                        + text
-                    ),
-                    response_format=ForegroundInterpretation,
-                )
-                structure = lock_foreground_interpretation(repair)
-                failures = structure_gate(structure, text)
-            if failures:
-                raise ValueError("; ".join(failures))
-            _write_json(path, structure)
-            self.store.record_processes(doi, structure)
-            self.store.complete_job(key, path)
-            return structure
-        except Exception as exc:
-            self.store.fail_job(key, str(exc))
-            raise
+        return super()._structure(doi, source_hash, doc, paper_dir)
 
     def _assignment_chunk(self, doi, source_hash, structure, candidates, idx, paper_dir):  # noqa: ANN001
         path = paper_dir / "extraction" / "assignments_retrieval" / f"chunk_{idx:03d}.json"
@@ -160,6 +100,7 @@ class RetrievalPaperProcessor(PaperProcessor):
                 "candidate_count": len(candidates),
                 "retained_for_reasoning": len(retained),
                 "safe_excluded_from_reasoning": len(excluded),
+                "safe_excluded_candidate_ids": [candidate.candidate_id for candidate in excluded],
                 "routes": [route.as_dict() for route in routes],
             },
         )
@@ -170,8 +111,9 @@ class RetrievalPaperProcessor(PaperProcessor):
                 disposition="not_inventory",
                 process_ids=[],
                 rationale=(
-                    "High-confidence retrieval router identified this as LCIA/result evidence with no competing "
-                    "inventory signal. Candidate remains preserved in the audit trail. "
+                    "High-confidence retrieval router identified an explicit LCIA/result table row with no "
+                    "competing inventory or modelling-assumption signal. Candidate remains preserved in the "
+                    "audit trail. "
                     + "; ".join(route_by_id[candidate.candidate_id].reasons)
                 ),
             )
