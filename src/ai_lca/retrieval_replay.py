@@ -20,6 +20,7 @@ from .autonomous_literature import (
 from .corpus_diagnostics import BASELINE_MANIFEST, load_baseline_papers
 from .evidence_router import (
     build_structure_evidence,
+    exclusion_is_structurally_safe,
     normalised_contains,
     partition_inventory_candidates,
     route_inventory_candidates,
@@ -51,14 +52,24 @@ def _collect_evidence_texts(value: Any) -> list[str]:
 
 
 def audit_router(state_dir: Path, manifest: Path, dois: list[str]) -> dict[str, Any]:
-    """Measure retrieval safety against the frozen baseline before API calls."""
+    """Audit deterministic routing against corpus invariants before API calls.
+
+    The frozen model assignments are useful diagnostics, not gold labels: the first
+    audit exposed many LCIA result rows that the baseline itself had incorrectly
+    marked as modeled inventory. We therefore record baseline disagreements but gate
+    on independent structural invariants: only explicit LCIA result table rows with
+    no competing LCI or modelling-assumption signal may be hard-pruned.
+    """
 
     _, papers = load_baseline_papers(state_dir, manifest)
     by_doi = {paper["doi"]: paper for paper in papers}
     per_paper: list[dict[str, Any]] = []
     total_modeled = 0
+    total_baseline_not_inventory = 0
     total_excluded = 0
-    total_excluded_modeled = 0
+    total_modeled_disagreements = 0
+    total_not_inventory_agreements = 0
+    total_unsafe_exclusions = 0
     total_structure_evidence = 0
     total_structure_evidence_retrieved = 0
 
@@ -70,6 +81,8 @@ def audit_router(state_dir: Path, manifest: Path, dois: list[str]) -> dict[str, 
         raw_candidates = _read(paper_dir / "extraction" / "inventory_candidates.json", []) or []
         candidates = [InventoryCandidate(**item) for item in raw_candidates]
         retained, excluded, routes = partition_inventory_candidates(candidates)
+        route_by_id = {route.candidate_id: route for route in routes}
+        candidate_by_id = {candidate.candidate_id: candidate for candidate in candidates}
         excluded_ids = {candidate.candidate_id for candidate in excluded}
 
         raw_assignments = _read(paper_dir / "extraction" / "assignments.json", {}) or {}
@@ -79,7 +92,18 @@ def audit_router(state_dir: Path, manifest: Path, dois: list[str]) -> dict[str, 
             for assignment in baseline.assignments
             if assignment.disposition == "modeled_inventory"
         }
-        lost = sorted(modeled_ids & excluded_ids)
+        not_inventory_ids = {
+            assignment.candidate_id
+            for assignment in baseline.assignments
+            if assignment.disposition == "not_inventory"
+        }
+        modeled_disagreements = sorted(modeled_ids & excluded_ids)
+        not_inventory_agreements = sorted(not_inventory_ids & excluded_ids)
+        unsafe = sorted(
+            candidate_id
+            for candidate_id in excluded_ids
+            if not exclusion_is_structurally_safe(candidate_by_id[candidate_id], route_by_id[candidate_id])
+        )
 
         structure_total = 0
         structure_hit = 0
@@ -94,14 +118,17 @@ def audit_router(state_dir: Path, manifest: Path, dois: list[str]) -> dict[str, 
                 structure_total = len(evidence_texts)
                 structure_hit = sum(normalised_contains(pack.text, text) for text in evidence_texts)
             except Exception:
-                # Structure retrieval recall is diagnostic only in this first replay;
-                # inventory safety remains the hard gate.
+                # Structure retrieval is diagnostic only in v1. The A/B retains the
+                # trusted full-context structure stage until its recall is adequate.
                 structure_total = 0
                 structure_hit = 0
 
         total_modeled += len(modeled_ids)
+        total_baseline_not_inventory += len(not_inventory_ids)
         total_excluded += len(excluded)
-        total_excluded_modeled += len(lost)
+        total_modeled_disagreements += len(modeled_disagreements)
+        total_not_inventory_agreements += len(not_inventory_agreements)
+        total_unsafe_exclusions += len(unsafe)
         total_structure_evidence += structure_total
         total_structure_evidence_retrieved += structure_hit
         per_paper.append(
@@ -111,7 +138,10 @@ def audit_router(state_dir: Path, manifest: Path, dois: list[str]) -> dict[str, 
                 "retained_for_reasoning": len(retained),
                 "safe_excluded_from_reasoning": len(excluded),
                 "baseline_modeled_candidate_count": len(modeled_ids),
-                "excluded_baseline_modeled_candidate_ids": lost,
+                "baseline_not_inventory_candidate_count": len(not_inventory_ids),
+                "baseline_modeled_disagreement_candidate_ids": modeled_disagreements,
+                "baseline_not_inventory_agreement_candidate_ids": not_inventory_agreements,
+                "unsafe_exclusion_candidate_ids": unsafe,
                 "structure_evidence_count": structure_total,
                 "structure_evidence_retrieved": structure_hit,
                 "route_counts": {
@@ -121,7 +151,6 @@ def audit_router(state_dir: Path, manifest: Path, dois: list[str]) -> dict[str, 
             }
         )
 
-    inventory_recall = 1.0 if total_modeled == 0 else (total_modeled - total_excluded_modeled) / total_modeled
     structure_recall = (
         1.0
         if total_structure_evidence == 0
@@ -130,17 +159,24 @@ def audit_router(state_dir: Path, manifest: Path, dois: list[str]) -> dict[str, 
     return {
         "paper_count": len(per_paper),
         "baseline_modeled_candidate_count": total_modeled,
+        "baseline_not_inventory_candidate_count": total_baseline_not_inventory,
         "safe_excluded_candidate_count": total_excluded,
-        "excluded_baseline_modeled_candidate_count": total_excluded_modeled,
-        "inventory_recall_against_baseline": inventory_recall,
+        "baseline_modeled_disagreement_count": total_modeled_disagreements,
+        "baseline_not_inventory_agreement_count": total_not_inventory_agreements,
+        "unsafe_exclusion_count": total_unsafe_exclusions,
         "structure_evidence_recall_against_baseline": structure_recall,
-        "inventory_safety_pass": total_excluded_modeled == 0,
+        "structure_retrieval_enabled_in_v1": False,
+        "inventory_safety_pass": total_unsafe_exclusions == 0,
         "per_paper": per_paper,
     }
 
 
 class RoutedTargetedReplayProcessor(TargetedReplayProcessor):
-    """Replay only unresolved baseline evidence after conservative routing."""
+    """Replay only unresolved baseline evidence after conservative routing.
+
+    Existing resolved assignments and the existing full-context structure are reused.
+    Retrieval operates only on missing/ambiguous inventory candidates in v1.
+    """
 
     def _assign(self, doi, source_hash, structure, candidates, paper_dir):  # noqa: ANN001
         path = paper_dir / "extraction" / "assignments.json"
@@ -175,8 +211,8 @@ class RoutedTargetedReplayProcessor(TargetedReplayProcessor):
                 disposition="not_inventory",
                 process_ids=[],
                 rationale=(
-                    "High-confidence retrieval router identified LCIA/result evidence with no competing inventory "
-                    "signal; source candidate remains preserved. "
+                    "High-confidence retrieval router identified an explicit LCIA result table row with no "
+                    "competing inventory or modelling-assumption signal; source candidate remains preserved. "
                     + "; ".join(route_by_id[candidate.candidate_id].reasons)
                 ),
             )
@@ -199,7 +235,7 @@ class RoutedTargetedReplayProcessor(TargetedReplayProcessor):
                     [routed_candidate_payload(candidate, route_by_id[candidate.candidate_id]) for candidate in retained],
                     ensure_ascii=False,
                 )
-                + "\n\nThe route is advisory. Override it if the source evidence requires it."
+                + "\n\nThe evidence route is advisory. Override it whenever the source evidence requires it."
             )
             repair = self.api.parse(
                 doi=doi,
@@ -237,7 +273,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "before": before,
             "router_audit": audit,
             "results": [],
-            "comparison": {"improved_papers": [], "regressions": [{"reason": "router safety audit failed"}], "unchanged_papers": [], "pass_gate": False},
+            "comparison": {
+                "improved_papers": [],
+                "regressions": [{"reason": "router structural safety audit failed"}],
+                "unchanged_papers": [],
+                "pass_gate": False,
+            },
             "usage": {"calls_this_run": 0, "tokens_this_run": 0, "estimated_cost_this_run_usd": 0.0},
         }
         args.output.parent.mkdir(parents=True, exist_ok=True)

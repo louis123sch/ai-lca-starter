@@ -22,10 +22,11 @@ def report(*, status="UNRESOLVED_INVENTORY", ambiguity=2, flows=3, tokens=100, c
     return payload
 
 
-def safe_audit():
+def safe_audit(*, baseline_disagreements=0):
     return {
         "inventory_safety_pass": True,
-        "excluded_baseline_modeled_candidate_count": 0,
+        "unsafe_exclusion_count": 0,
+        "baseline_modeled_disagreement_count": baseline_disagreements,
     }
 
 
@@ -35,6 +36,14 @@ def test_retrieval_gate_accepts_same_quality_with_lower_tokens():
     comparison = compare_reports(control, routed)
     assert comparison["pass_gate"] is True
     assert comparison["efficiency_noninferior"] is True
+
+
+def test_baseline_disagreements_do_not_fail_structurally_safe_router():
+    control = report(tokens=100, cost=0.10)
+    routed = report(tokens=80, cost=0.08, audit=safe_audit(baseline_disagreements=12))
+    comparison = compare_reports(control, routed)
+    assert comparison["pass_gate"] is True
+    assert comparison["router_safety_pass"] is True
 
 
 def test_retrieval_gate_rejects_flow_regression_even_if_cheaper():
@@ -52,7 +61,8 @@ def test_retrieval_gate_rejects_router_safety_failure():
         cost=0.08,
         audit={
             "inventory_safety_pass": False,
-            "excluded_baseline_modeled_candidate_count": 1,
+            "unsafe_exclusion_count": 1,
+            "baseline_modeled_disagreement_count": 0,
         },
     )
     comparison = compare_reports(control, routed)

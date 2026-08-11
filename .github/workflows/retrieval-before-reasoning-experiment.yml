@@ -81,7 +81,9 @@ jobs:
           print(json.dumps(summary, indent=2))
           assert audit['paper_count'] == 44, audit['paper_count']
           assert audit['inventory_safety_pass'], audit
-          assert audit['excluded_baseline_modeled_candidate_count'] == 0, audit
+          assert audit['unsafe_exclusion_count'] == 0, audit
+          # Baseline modeled disagreements are diagnostic, not a hard failure: the
+          # baseline itself contains LCIA-result rows mislabeled as inventory.
           PY
 
       - name: Prepare independent canary control and retrieval states

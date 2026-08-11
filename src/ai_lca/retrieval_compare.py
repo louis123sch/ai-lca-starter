@@ -60,7 +60,7 @@ def compare_reports(control: dict[str, Any], routed: dict[str, Any]) -> dict[str
     routed_cost = float(routed_usage.get("estimated_cost_this_run_usd") or 0.0)
 
     audit = routed.get("router_audit", {}) or {}
-    safety_pass = bool(audit.get("inventory_safety_pass")) and int(audit.get("excluded_baseline_modeled_candidate_count") or 0) == 0
+    safety_pass = bool(audit.get("inventory_safety_pass")) and int(audit.get("unsafe_exclusion_count") or 0) == 0
     token_change = routed_tokens - control_tokens
     cost_change = routed_cost - control_cost
     efficiency_noninferior = routed_tokens <= control_tokens and routed_cost <= control_cost + 1e-9

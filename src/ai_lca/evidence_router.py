@@ -26,6 +26,15 @@ _LCIA_PATTERNS = (
     re.compile(r"environmental impact|lcia|life cycle impact", re.IGNORECASE),
 )
 
+_RESULT_TABLE_PATTERNS = (
+    re.compile(r"characteri[sz]ed impacts?", re.IGNORECASE),
+    re.compile(r"environmental impact (?:data|results?)", re.IGNORECASE),
+    re.compile(r"impact categor", re.IGNORECASE),
+    re.compile(r"global warming potential|\bgwp\b", re.IGNORECASE),
+    re.compile(r"life cycle impact assessment|\blcia\b", re.IGNORECASE),
+    re.compile(r"contribution .* impact", re.IGNORECASE),
+)
+
 _LCI_PATTERNS = (
     re.compile(r"\binput(?:s)?\b|\boutput(?:s)?\b", re.IGNORECASE),
     re.compile(r"inventory|\blci\b|bill of materials|\bbom\b", re.IGNORECASE),
@@ -43,7 +52,7 @@ _STRUCTURE_PATTERNS = (
 )
 
 _ASSUMPTION_PATTERNS = (
-    re.compile(r"allocation|cut[- ]?off|system expansion", re.IGNORECASE),
+    re.compile(r"allocation|attribution|cut[- ]?off|system expansion", re.IGNORECASE),
     re.compile(r"lifetime|service life|operating hours|capacity factor", re.IGNORECASE),
     re.compile(r"efficien|yield|conversion|recovery|loss(?:es)?", re.IGNORECASE),
     re.compile(r"recycl|reuse|replacement|utilisation|utilization", re.IGNORECASE),
@@ -102,13 +111,16 @@ def _candidate_text(candidate: InventoryCandidate) -> str:
 def route_inventory_candidate(candidate: InventoryCandidate) -> EvidenceRoute:
     """Route evidence conservatively before expensive reasoning.
 
-    Only very strong LCIA/result evidence is safe-excluded. All other labels are
-    advisory and remain available to downstream reasoning. This intentionally
-    optimizes recall over token reduction.
+    The label is always advisory. Hard exclusion is deliberately narrower: it is
+    allowed only for table rows with multiple LCIA/result signals, explicit result
+    table context, no competing inventory signal, and no modelling-assumption cue.
+    Section statements are never hard-pruned because they often combine goal/scope,
+    process and quantitative context in one sentence.
     """
 
     text = _candidate_text(candidate)
     lcia = _count(_LCIA_PATTERNS, text)
+    result_table = _count(_RESULT_TABLE_PATTERNS, text)
     lci = _count(_LCI_PATTERNS, text)
     structure = _count(_STRUCTURE_PATTERNS, text)
     assumption = _count(_ASSUMPTION_PATTERNS, text)
@@ -116,6 +128,8 @@ def route_inventory_candidate(candidate: InventoryCandidate) -> EvidenceRoute:
 
     if lcia:
         reasons.append(f"lcia_signals={lcia}")
+    if result_table:
+        reasons.append(f"result_table_signals={result_table}")
     if lci:
         reasons.append(f"lci_signals={lci}")
     if structure:
@@ -123,18 +137,31 @@ def route_inventory_candidate(candidate: InventoryCandidate) -> EvidenceRoute:
     if assumption:
         reasons.append(f"assumption_signals={assumption}")
 
-    # A CO2 emission can be an LCI flow, so LCIA is only auto-excluded when
-    # impact/category semantics are strong and no inventory semantics compete.
-    strong_lcia = lcia >= 2 and lci == 0
-    if strong_lcia:
-        confidence = min(0.99, 0.90 + 0.03 * (lcia - 2))
+    # A CO2 emission can be an LCI flow and quantitative goal/scope text can
+    # mention impact categories. Therefore hard exclusion is table-only and
+    # requires explicit result-table semantics with no competing LCI/assumption cue.
+    safe_lcia_result = (
+        candidate.evidence_type == "table_row"
+        and lcia >= 2
+        and result_table >= 1
+        and lci == 0
+        and assumption == 0
+    )
+    if safe_lcia_result:
+        confidence = min(0.99, 0.91 + 0.02 * max(0, lcia + result_table - 3))
         return EvidenceRoute(candidate.candidate_id, "lcia_result", confidence, True, tuple(reasons))
+
+    # Even when not safe to prune, expose LCIA evidence as an advisory route so
+    # downstream reasoning can distinguish it from foreground inventory.
+    if lcia >= 2 and lci == 0 and assumption == 0:
+        confidence = min(0.94, 0.75 + 0.04 * max(0, lcia - 2))
+        return EvidenceRoute(candidate.candidate_id, "lcia_result", confidence, False, tuple(reasons))
 
     if lci >= 2 or (lci >= 1 and candidate.evidence_type == "table_row"):
         confidence = min(0.97, 0.72 + 0.07 * max(0, lci - 1))
         return EvidenceRoute(candidate.candidate_id, "foreground_lci", confidence, False, tuple(reasons))
 
-    if assumption >= 2 and lci == 0:
+    if assumption >= 1 and lci == 0:
         confidence = min(0.92, 0.72 + 0.06 * assumption)
         return EvidenceRoute(candidate.candidate_id, "modelling_assumption", confidence, False, tuple(reasons))
 
@@ -173,6 +200,21 @@ def routed_candidate_payload(candidate: InventoryCandidate, route: EvidenceRoute
     return payload
 
 
+def exclusion_is_structurally_safe(candidate: InventoryCandidate, route: EvidenceRoute) -> bool:
+    """Independent invariant used by corpus audits before any model calls."""
+
+    if not route.safe_to_exclude_from_inventory_reasoning:
+        return True
+    text = _candidate_text(candidate)
+    return (
+        candidate.evidence_type == "table_row"
+        and route.label == "lcia_result"
+        and _count(_RESULT_TABLE_PATTERNS, text) >= 1
+        and _count(_LCI_PATTERNS, text) == 0
+        and _count(_ASSUMPTION_PATTERNS, text) == 0
+    )
+
+
 def _section_score(title: str, text: str) -> int:
     sample = f"{title}\n{text[:2400]}"
     return (
@@ -194,12 +236,11 @@ def _table_score(caption: str, rows: list[str]) -> int:
 
 
 def build_structure_evidence(doc: JATSDocument, max_chars: int = 50_000) -> StructureEvidencePack:
-    """Build a bounded, provenance-preserving structure evidence pack.
+    """Build an experimental bounded structure evidence pack.
 
-    Title and abstract are always retained. Sections/tables are ranked, but the
-    chosen evidence is restored to document order before rendering so the model
-    still sees coherent source context. If the router cannot find enough clear
-    evidence, it widens automatically rather than returning a tiny context.
+    This is retained for measurement, but the first retrieval A/B does not replace
+    the trusted full-context structure stage because frozen-corpus recall is not yet
+    high enough. Candidate routing is tested independently first.
     """
 
     header = [
@@ -245,7 +286,6 @@ def build_structure_evidence(doc: JATSDocument, max_chars: int = 50_000) -> Stru
         row_text = "\n".join(f"[TABLE: {label} | ROW {row_idx}] {row}" for row_idx, row in enumerate(rows, 1))
         block = f"[TABLE: {label}]\nCAPTION: {caption}\n{row_text}"
         if len("\n\n".join(parts + [block])) > max_chars:
-            # Keep the caption even when the full table will not fit.
             caption_only = f"[TABLE: {label}]\nCAPTION: {caption}"
             if len("\n\n".join(parts + [caption_only])) <= max_chars:
                 parts.append(caption_only)

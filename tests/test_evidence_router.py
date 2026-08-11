@@ -1,5 +1,6 @@
 from ai_lca.evidence_router import (
     build_structure_evidence,
+    exclusion_is_structurally_safe,
     partition_inventory_candidates,
     route_inventory_candidate,
 )
@@ -13,7 +14,7 @@ def candidate(text: str, *, context: str = "caption=inventory", evidence_type: s
         evidence_text=text,
         context=context,
         evidence_type=evidence_type,
-        table="T1",
+        table="T1" if evidence_type == "table_row" else None,
     )
 
 
@@ -27,11 +28,12 @@ def test_foreground_inventory_is_retained_for_reasoning():
 def test_strong_lcia_result_can_be_safely_excluded():
     item = candidate(
         "Global warming potential | 4.2 kg CO2-eq",
-        context="caption=Life cycle impact assessment results; impact category",
+        context="caption=Life cycle impact assessment results; headers=Impact category | Result",
     )
     route = route_inventory_candidate(item)
     assert route.label == "lcia_result"
     assert route.safe_to_exclude_from_inventory_reasoning is True
+    assert exclusion_is_structurally_safe(item, route) is True
 
 
 def test_co2_emission_is_not_mistaken_for_lcia_result():
@@ -40,6 +42,27 @@ def test_co2_emission_is_not_mistaken_for_lcia_result():
         context="caption=Life cycle inventory outputs",
     )
     route = route_inventory_candidate(item)
+    assert route.safe_to_exclude_from_inventory_reasoning is False
+
+
+def test_goal_scope_statement_is_never_hard_pruned_even_when_it_mentions_impacts():
+    item = candidate(
+        "The goal of this life cycle assessment was to assess environmental impact and impact categories. "
+        "The functional unit is 1 kg purified product and the system boundary is cradle-to-gate.",
+        context="section=Goal and scope",
+        evidence_type="section_statement",
+    )
+    route = route_inventory_candidate(item)
+    assert route.safe_to_exclude_from_inventory_reasoning is False
+
+
+def test_allocation_or_attribution_evidence_is_not_hard_pruned():
+    item = candidate(
+        "Mass allocation | impacts are attributed by relative co-product mass | GWP 1.65 kg CO2 eq",
+        context="caption=Attribution methods assessed for co-products; headers=Attribution method | GWP",
+    )
+    route = route_inventory_candidate(item)
+    assert route.label == "modelling_assumption"
     assert route.safe_to_exclude_from_inventory_reasoning is False
 
 
