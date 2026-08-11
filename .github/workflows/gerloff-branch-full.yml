@@ -2,7 +2,7 @@ name: Gerloff branch full benchmark
 
 # Branch-only harness: touching this file intentionally triggers a full benchmark
 # after the fast Gerloff gates have been verified stable.
-# Trigger after structural-dedupe fast-gate pass.
+# Trigger after locked-flow attachment fast-gate pass.
 on:
   push:
     branches: [feat/gerloff-fast-visual-regression]
