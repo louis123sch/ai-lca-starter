@@ -71,9 +71,9 @@ jobs:
           python -m ai_lca.controlled_accuracy run \
             --state-dir experiment_state \
             --scope "${{ steps.scope.outputs.scope }}" \
-            --max-total-calls 10 \
-            --max-total-tokens 200000 \
-            --max-estimated-cost-usd 0.10 \
+            --max-total-calls 3 \
+            --max-total-tokens 60000 \
+            --max-estimated-cost-usd 0.01 \
             --output artifacts/accuracy_iteration_v1.json
       - name: Upload evidence
         if: always()
