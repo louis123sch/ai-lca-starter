@@ -103,9 +103,23 @@ jobs:
             --model "$OPENAI_REPAIR_MODEL" \
             --reasoning-effort medium \
             --max-context-chars 90000 \
+            --max-proposal-attempts 3 \
             --output-dir artifacts/autonomous_iteration
 
+      - name: Detect proposed code change
+        id: repair_change
+        shell: bash
+        run: |
+          if git diff --quiet -- src/ai_lca tests; then
+            echo "has_change=false" >> "$GITHUB_OUTPUT"
+            echo "No valid bounded repair was produced. Expensive corpus gates will be skipped for this cycle."
+          else
+            echo "has_change=true" >> "$GITHUB_OUTPUT"
+            echo "A bounded repair was applied. Proceeding through corpus gates."
+          fi
+
       - name: Micro gate
+        if: steps.repair_change.outputs.has_change == 'true'
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
@@ -119,6 +133,7 @@ jobs:
             --output artifacts/micro.json
 
       - name: Canary gate
+        if: steps.repair_change.outputs.has_change == 'true'
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
@@ -132,6 +147,7 @@ jobs:
             --output artifacts/canary.json
 
       - name: Affected-cohort gate
+        if: steps.repair_change.outputs.has_change == 'true'
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
@@ -146,6 +162,7 @@ jobs:
             --output artifacts/cohort.json
 
       - name: Full 44-paper regression gate
+        if: steps.repair_change.outputs.has_change == 'true'
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
@@ -159,12 +176,9 @@ jobs:
             --output artifacts/full_regression.json
 
       - name: Commit accepted development repair
+        if: steps.repair_change.outputs.has_change == 'true'
         shell: bash
         run: |
-          if git diff --quiet; then
-            echo "::error::All gates passed but there is no code change to commit."
-            exit 4
-          fi
           git config user.name "ai-lca-autonomous-development"
           git config user.email "actions@users.noreply.github.com"
           git add src/ai_lca tests
@@ -173,6 +187,7 @@ jobs:
           git push origin HEAD:inventory-recall-development
 
       - name: Open or update draft promotion PR
+        if: steps.repair_change.outputs.has_change == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
