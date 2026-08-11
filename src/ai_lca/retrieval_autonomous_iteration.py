@@ -72,7 +72,7 @@ Scientific-integrity constraints are absolute:
 - prefer deterministic/high-recall routing and small targeted fixes over larger prompts or broader model use;
 - do not optimize merely for lower token use if extraction quality regresses.
 
-Return a small git unified diff touching ONLY allowed files, with tests for behavior changes. When genuine candidate-level regressions are present, do not return an empty diff merely because success is uncertain: implement the safest bounded experiment justified by the hypothesis. Empty diff is appropriate only for benchmark/infrastructure censoring or when all possible changes would violate scientific integrity."""
+Return ONLY a standard git unified diff in unified_diff touching ONLY allowed files, with tests for behavior changes. The unified_diff value MUST use conventional git patch headers exactly like `--- a/<path>` and `+++ b/<path>` followed by numbered `@@ -old,+new @@` hunks. Do NOT use Markdown fences, `*** Begin Patch`, `*** Update File`, `*** End Patch`, apply_patch syntax, prose, or any other custom patch format inside unified_diff. When genuine candidate-level regressions are present, do not return an empty diff merely because success is uncertain: implement the safest bounded experiment justified by the hypothesis. Empty diff is appropriate only for benchmark/infrastructure censoring or when all possible changes would violate scientific integrity."""
 
 
 def _read_json(path: Path, default: Any = None) -> Any:
