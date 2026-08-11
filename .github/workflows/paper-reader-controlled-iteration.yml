@@ -28,6 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: agent/paper-reader-controlled-iteration-1
+          fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -41,7 +42,7 @@ jobs:
         id: scope
         shell: bash
         run: |
-          changed=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")
+          changed=$(git diff --name-only HEAD^ HEAD)
           if grep -qx '.control/run-canary-v1' <<< "$changed"; then
             echo "scope=canary" >> "$GITHUB_OUTPUT"
           elif grep -qx '.control/run-single-v1' <<< "$changed"; then
