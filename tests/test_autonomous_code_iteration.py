@@ -2,12 +2,41 @@ from __future__ import annotations
 
 import pytest
 
-from ai_lca.autonomous_code_iteration import PatchProposal, _changed_paths, _validate_patch
+from ai_lca.autonomous_code_iteration import (
+    PatchProposal,
+    _changed_paths,
+    _normalise_unified_diff,
+    _validate_patch,
+)
 
 
 def test_changed_paths_reads_unified_diff_targets() -> None:
     diff = """--- a/src/ai_lca/jats.py
 +++ b/src/ai_lca/jats.py
+@@ -1 +1 @@
+-old
++new
+"""
+    assert _changed_paths(diff) == {"src/ai_lca/jats.py"}
+
+
+def test_changed_paths_accepts_bare_paths_and_markdown_fence() -> None:
+    diff = """```diff
+--- src/ai_lca/jats.py
++++ src/ai_lca/jats.py
+@@ -1 +1 @@
+-old
++new
+```
+"""
+    normalised = _normalise_unified_diff(diff)
+    assert normalised.startswith("--- a/src/ai_lca/jats.py\n+++ b/src/ai_lca/jats.py\n")
+    assert "```" not in normalised
+    assert _changed_paths(normalised) == {"src/ai_lca/jats.py"}
+
+
+def test_changed_paths_accepts_diff_git_header_fallback() -> None:
+    diff = """diff --git a/src/ai_lca/jats.py b/src/ai_lca/jats.py
 @@ -1 +1 @@
 -old
 +new
