@@ -121,7 +121,7 @@ def _normalise_header_path(raw: str, prefix: str) -> str:
 
 
 def _normalise_unified_diff(diff: str) -> str:
-    """Accept common model formatting variants but emit one git-applyable form."""
+    """Accept common model formatting variants but emit one canonical form."""
     text = _strip_markdown_fence(diff)
     lines = text.splitlines()
     first = next(
@@ -201,16 +201,70 @@ def _find_unique_sequence(haystack: list[str], needle: list[str]) -> int:
     return matches[0]
 
 
+def _hunk_sequences(body: list[str]) -> tuple[list[str], list[str]]:
+    old_lines: list[str] = []
+    new_lines: list[str] = []
+    for body_line in body:
+        if body_line.startswith("\\ No newline at end of file"):
+            continue
+        if not body_line or body_line[0] not in {" ", "+", "-"}:
+            raise ValueError(f"unsupported line in patch hunk: {body_line!r}")
+        prefix, text = body_line[0], body_line[1:]
+        if prefix in {" ", "-"}:
+            old_lines.append(text)
+        if prefix in {" ", "+"}:
+            new_lines.append(text)
+    return old_lines, new_lines
+
+
+def _iter_patch_hunks(diff: str) -> list[tuple[str, list[str]]]:
+    lines = diff.splitlines()
+    current_path: str | None = None
+    hunks: list[tuple[str, list[str]]] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("+++ "):
+            current_path = _patch_target_path(line)
+            i += 1
+            continue
+        if not line.startswith("@@"):
+            i += 1
+            continue
+        if not _HUNK_HEADER_RE.match(line) and line.strip() != "@@":
+            raise ValueError(f"unsupported malformed hunk header: {line!r}")
+        if not current_path or current_path == "/dev/null":
+            raise ValueError("patch hunk does not target an existing file")
+        j = i + 1
+        body: list[str] = []
+        while j < len(lines):
+            if lines[j].startswith("@@"):
+                break
+            if (
+                lines[j].startswith("--- ")
+                and j + 1 < len(lines)
+                and lines[j + 1].startswith("+++ ")
+            ):
+                break
+            body.append(lines[j])
+            j += 1
+        if any(
+            body_line.startswith(("+", "-"))
+            and not body_line.startswith(("+++", "---"))
+            for body_line in body
+        ):
+            hunks.append((current_path, body))
+        i = j
+    return hunks
+
+
 def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
     """Canonicalize model hunk locations from exact source context.
 
-    A model may emit a bare ``@@`` header or valid-looking but incorrect line
-    numbers. When the full original/context sequence has exactly one match in
-    the target file, recompute the hunk ranges deterministically. Context-only
-    no-op hunks are dropped because they carry no proposed change. If a numbered
-    hunk cannot be uniquely located, leave its declared range intact so
-    ``git apply --check`` can decide it. Bare or malformed hunks that cannot be
-    located are rejected rather than guessed.
+    This artifact-normalization step is conservative: it rewrites a hunk's line
+    numbers only when its complete original/context sequence occurs exactly once
+    in the current target file, and it removes context-only no-op hunks. Content
+    is never inferred or altered here.
     """
     lines = diff.splitlines()
     out: list[str] = []
@@ -226,7 +280,6 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
             out.append(line)
             i += 1
             continue
-
         if not line.startswith("@@"):
             out.append(line)
             i += 1
@@ -237,14 +290,7 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
         if not valid and not is_bare:
             raise ValueError(f"unsupported malformed hunk header: {line!r}")
         if not current_path or current_path == "/dev/null":
-            if valid:
-                old_count = int(valid.group("old_count") or 1)
-                new_count = int(valid.group("new_count") or 1)
-                delta += new_count - old_count
-                out.append(line)
-                i += 1
-                continue
-            raise ValueError("cannot repair hunk without an existing target file")
+            raise ValueError("cannot normalize hunk without an existing target file")
 
         j = i + 1
         body: list[str] = []
@@ -269,25 +315,11 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
             i = j
             continue
 
-        old_lines: list[str] = []
-        new_lines: list[str] = []
-        body_is_parseable = True
-        for body_line in body:
-            if body_line.startswith("\\ No newline at end of file"):
-                continue
-            if not body_line or body_line[0] not in {" ", "+", "-"}:
-                body_is_parseable = False
-                break
-            prefix, text = body_line[0], body_line[1:]
-            if prefix in {" ", "-"}:
-                old_lines.append(text)
-            if prefix in {" ", "+"}:
-                new_lines.append(text)
-
+        old_lines, new_lines = _hunk_sequences(body)
         source = root / current_path
         match_index: int | None = None
         locate_error: ValueError | None = None
-        if body_is_parseable and source.exists():
+        if source.exists():
             try:
                 match_index = _find_unique_sequence(
                     source.read_text(encoding="utf-8").splitlines(), old_lines
@@ -319,8 +351,6 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
             i = j
             continue
 
-        if not body_is_parseable:
-            raise ValueError("unsupported line in bare hunk body")
         if not source.exists():
             raise ValueError(
                 f"cannot repair bare hunk; target file not found: {current_path}"
@@ -330,6 +360,41 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
         raise ValueError("cannot safely locate bare hunk")
 
     return "\n".join(out).rstrip() + "\n"
+
+
+def _apply_exact_patch(diff: str, root: Path = Path(".")) -> None:
+    """Apply patch content by exact unique old-sequence replacement.
+
+    Model-supplied line numbers are deliberately ignored. Every changed hunk
+    must match the current file content exactly once. All replacements are
+    prepared in memory first, so a later failure cannot leave a partial patch.
+    """
+    hunks = _iter_patch_hunks(diff)
+    if not hunks:
+        raise ValueError("proposal contains no content-changing hunks")
+
+    originals: dict[str, tuple[list[str], bool]] = {}
+    working: dict[str, list[str]] = {}
+    for path, _ in hunks:
+        if path not in originals:
+            source = root / path
+            if not source.exists():
+                raise ValueError(f"patch target file not found: {path}")
+            text = source.read_text(encoding="utf-8")
+            originals[path] = (text.splitlines(), text.endswith("\n"))
+            working[path] = list(originals[path][0])
+
+    for path, body in hunks:
+        old_lines, new_lines = _hunk_sequences(body)
+        index = _find_unique_sequence(working[path], old_lines)
+        working[path][index : index + len(old_lines)] = new_lines
+
+    for path, lines in working.items():
+        _, had_final_newline = originals[path]
+        text = "\n".join(lines)
+        if had_final_newline:
+            text += "\n"
+        (root / path).write_text(text, encoding="utf-8")
 
 
 def _validate_patch(proposal: PatchProposal, allowed: set[str]) -> None:
@@ -498,15 +563,10 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
             rejection_reasons.append(f"attempt {attempt}: {exc}")
             continue
 
-        patch_path = args.output_dir / f"proposal_attempt_{attempt}.patch"
-        check = _run(
-            ["git", "apply", "--recount", "--check", str(patch_path)], check=False
-        )
-        if check.returncode:
-            rejection_reasons.append(
-                "attempt "
-                f"{attempt}: git apply --check failed: {(check.stderr or check.stdout)[-1200:]}"
-            )
+        try:
+            _apply_exact_patch(normalised_diff)
+        except ValueError as exc:
+            rejection_reasons.append(f"attempt {attempt}: exact patch apply failed: {exc}")
             continue
 
         accepted = normalised
@@ -520,7 +580,6 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
         (args.output_dir / "proposal.patch").write_text(
             normalised_diff, encoding="utf-8"
         )
-        _run(["git", "apply", "--recount", str(patch_path)])
         break
 
     if accepted is None:
