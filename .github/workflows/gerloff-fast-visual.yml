@@ -117,4 +117,4 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-# Iteration trigger: validate generic component/material dedupe patch before any full benchmark.
+# Iteration trigger: validate locked-process flow attachment enforcement before any full benchmark.
