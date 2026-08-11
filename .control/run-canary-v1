@@ -1,0 +1,6 @@
+Controlled iteration v1 canary trigger.
+
+Scope: eight frozen papers.
+Only the three papers with deterministic final-LCIA targets may call the model.
+Hard cap: 3 calls, 60,000 tokens, $0.01.
+No autonomous continuation is permitted.
