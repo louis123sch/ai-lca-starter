@@ -1,38 +1,46 @@
-name: Retrieval-before-reasoning frozen-corpus A/B
+name: Retrieval-before-reasoning autonomous improvement
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [agent/retrieval-before-reasoning-clean]
     paths:
       - "src/ai_lca/evidence_router.py"
       - "src/ai_lca/retrieval_processor.py"
       - "src/ai_lca/retrieval_replay.py"
       - "src/ai_lca/retrieval_compare.py"
       - "src/ai_lca/frozen_replay.py"
+      - "src/ai_lca/retrieval_autonomous_iteration.py"
       - "tests/test_evidence_router.py"
       - "tests/test_retrieval_compare.py"
       - "tests/test_frozen_replay.py"
+      - ".autonomy/retrieval_rejection_history.jsonl"
       - ".github/workflows/retrieval-before-reasoning-experiment.yml"
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: read
+  pull-requests: write
+
+concurrency:
+  group: retrieval-before-reasoning-autonomous-pr15
+  cancel-in-progress: true
 
 env:
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   SPRINGER_API_KEY: ${{ secrets.SPRINGER_API_KEY }}
   OPENAI_MODEL: gpt-5-mini
   OPENAI_SCREEN_MODEL: gpt-5-nano
+  OPENAI_REPAIR_MODEL: gpt-5-mini
   BASELINE_RUN_ID: "31473783816"
   BASELINE_ARTIFACT: "phase1-scale-31473783816"
+  DEVELOPMENT_BRANCH: "agent/retrieval-before-reasoning-clean"
 
 jobs:
-  compare:
+  iterate:
     runs-on: ubuntu-latest
-    timeout-minutes: 110
+    timeout-minutes: 180
     steps:
-      - name: Check out retrieval experiment
+      - name: Check out PR 15 development branch
         uses: actions/checkout@v4
         with:
           ref: agent/retrieval-before-reasoning-clean
@@ -83,7 +91,7 @@ jobs:
           python -m compileall -q app.py src tests
           python -m pytest -q
 
-      - name: Audit router against all 44 frozen papers before any API calls
+      - name: Audit router against all 44 frozen papers before API calls
         run: |
           python - <<'PY'
           import json
@@ -103,105 +111,428 @@ jobs:
           assert audit['unsafe_exclusion_count'] == 0, audit
           PY
 
-      - name: Prepare independent canary control and retrieval states
+      - name: Prepare current-head canary states
         run: |
-          cp -a frozen_corpus control_canary_state
-          cp -a frozen_corpus routed_canary_state
+          cp -a frozen_corpus current_control_canary_state
+          cp -a frozen_corpus current_routed_canary_state
 
-      - name: Run frozen-structure control on canary
-        id: control_canary
+      - name: Run current frozen control canary
+        id: current_control_canary
         continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
           python -m ai_lca.frozen_replay \
             --mode control \
-            --state-dir control_canary_state \
+            --state-dir current_control_canary_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset canary \
             --max-total-calls 60 \
             --max-calls-per-paper 10 \
             --max-total-tokens 1000000 \
             --max-estimated-cost-usd 0.75 \
-            --output artifacts/control_canary.json
+            --output artifacts/current_control_canary.json 2>&1 | tee artifacts/current_control_canary.log
 
-      - name: Run frozen-structure retrieval on identical canary
-        id: routed_canary
+      - name: Run current frozen retrieval canary
+        id: current_routed_canary
         continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
           python -m ai_lca.frozen_replay \
             --mode routed \
-            --state-dir routed_canary_state \
+            --state-dir current_routed_canary_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset canary \
             --max-total-calls 60 \
             --max-calls-per-paper 10 \
             --max-total-tokens 1000000 \
             --max-estimated-cost-usd 0.75 \
-            --output artifacts/routed_canary.json
+            --output artifacts/current_routed_canary.json 2>&1 | tee artifacts/current_routed_canary.log
 
-      - name: Gate retrieval against canary control
-        id: canary_gate
+      - name: Gate current retrieval against canary control
+        id: current_canary_gate
+        continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
           python -m ai_lca.retrieval_compare \
-            --control artifacts/control_canary.json \
-            --routed artifacts/routed_canary.json \
-            --control-state control_canary_state \
-            --routed-state routed_canary_state \
+            --control artifacts/current_control_canary.json \
+            --routed artifacts/current_routed_canary.json \
+            --control-state current_control_canary_state \
+            --routed-state current_routed_canary_state \
             --manifest artifacts/frozen_replay_manifest.json \
-            --output artifacts/canary_comparison.json
+            --output artifacts/current_canary_comparison.json 2>&1 | tee artifacts/current_canary_comparison.log
 
-      - name: Prepare independent full-corpus control and retrieval states
-        if: steps.canary_gate.outcome == 'success'
+      - name: Prepare current-head full states
+        if: steps.current_canary_gate.outcome == 'success'
         run: |
-          cp -a frozen_corpus control_full_state
-          cp -a frozen_corpus routed_full_state
+          cp -a frozen_corpus current_control_full_state
+          cp -a frozen_corpus current_routed_full_state
 
-      - name: Run frozen-structure control on all 44 papers
-        if: steps.canary_gate.outcome == 'success'
-        id: control_full
+      - name: Run current frozen control on all 44
+        if: steps.current_canary_gate.outcome == 'success'
+        id: current_control_full
         continue-on-error: true
         run: |
           python -m ai_lca.frozen_replay \
             --mode control \
-            --state-dir control_full_state \
+            --state-dir current_control_full_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset full \
             --max-total-calls 220 \
             --max-calls-per-paper 10 \
             --max-total-tokens 4000000 \
             --max-estimated-cost-usd 3.00 \
-            --output artifacts/control_full.json
+            --output artifacts/current_control_full.json
 
-      - name: Run frozen-structure retrieval on all 44 papers
-        if: steps.canary_gate.outcome == 'success'
-        id: routed_full
+      - name: Run current frozen retrieval on all 44
+        if: steps.current_canary_gate.outcome == 'success'
+        id: current_routed_full
         continue-on-error: true
         run: |
           python -m ai_lca.frozen_replay \
             --mode routed \
-            --state-dir routed_full_state \
+            --state-dir current_routed_full_state \
             --manifest artifacts/frozen_replay_manifest.json \
             --subset full \
             --max-total-calls 220 \
             --max-calls-per-paper 10 \
             --max-total-tokens 4000000 \
             --max-estimated-cost-usd 3.00 \
-            --output artifacts/routed_full.json
+            --output artifacts/current_routed_full.json
 
-      - name: Gate retrieval against full control
-        if: steps.canary_gate.outcome == 'success'
+      - name: Gate current retrieval against full control
+        if: steps.current_canary_gate.outcome == 'success'
+        id: current_full_gate
+        continue-on-error: true
         run: |
           python -m ai_lca.retrieval_compare \
-            --control artifacts/control_full.json \
-            --routed artifacts/routed_full.json \
-            --control-state control_full_state \
-            --routed-state routed_full_state \
+            --control artifacts/current_control_full.json \
+            --routed artifacts/current_routed_full.json \
+            --control-state current_control_full_state \
+            --routed-state current_routed_full_state \
             --manifest artifacts/frozen_replay_manifest.json \
-            --output artifacts/full_comparison.json
+            --output artifacts/current_full_comparison.json
 
-      - name: Upload experiment evidence
+      - name: Decide whether a repair is needed
+        id: repair_needed
+        env:
+          CANARY_OUTCOME: ${{ steps.current_canary_gate.outcome }}
+          FULL_OUTCOME: ${{ steps.current_full_gate.outcome }}
+        shell: bash
+        run: |
+          if [ "$CANARY_OUTCOME" = "success" ] && [ "$FULL_OUTCOME" = "success" ]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "Current retrieval architecture passed canary and full 44-paper A/B; autonomous search stops for human promotion."
+          else
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enforce autonomous rejection cap
+        if: steps.repair_needed.outputs.value == 'true'
+        id: rejection_cap
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          path = Path('.autonomy/retrieval_rejection_history.jsonl')
+          count = 0
+          if path.exists():
+              for raw in path.read_text(encoding='utf-8').splitlines():
+                  try:
+                      row = json.loads(raw)
+                  except json.JSONDecodeError:
+                      continue
+                  if row.get('failure_class') == 'RETRIEVAL_BEFORE_REASONING':
+                      count += 1
+          print(f'count={count}')
+          print('allow=' + ('true' if count < 20 else 'false'))
+          PY
+
+      - name: Build aggregate retrieval diagnostics
+        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true'
+        env:
+          CONTROL_OUTCOME: ${{ steps.current_control_canary.outcome }}
+          ROUTED_OUTCOME: ${{ steps.current_routed_canary.outcome }}
+          CANARY_GATE_OUTCOME: ${{ steps.current_canary_gate.outcome }}
+          FULL_GATE_OUTCOME: ${{ steps.current_full_gate.outcome }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def load(name):
+              path = Path(name)
+              if not path.exists():
+                  return None
+              try:
+                  return json.loads(path.read_text(encoding='utf-8'))
+              except json.JSONDecodeError:
+                  return None
+
+          def tail(name, n=5000):
+              path = Path(name)
+              if not path.exists():
+                  return None
+              return path.read_text(encoding='utf-8', errors='replace')[-n:]
+
+          report = {
+              'failure_class_ranking': [{
+                  'failure_class': 'RETRIEVAL_BEFORE_REASONING',
+                  'affected_papers': 44,
+                  'priority_score': 1.0,
+              }],
+              'router_audit': load('artifacts/router_audit_full.json'),
+              'current_control_canary': load('artifacts/current_control_canary.json'),
+              'current_routed_canary': load('artifacts/current_routed_canary.json'),
+              'current_canary_comparison': load('artifacts/current_canary_comparison.json'),
+              'current_full_comparison': load('artifacts/current_full_comparison.json'),
+              'step_outcomes': {
+                  'control_canary': os.environ.get('CONTROL_OUTCOME'),
+                  'routed_canary': os.environ.get('ROUTED_OUTCOME'),
+                  'canary_gate': os.environ.get('CANARY_GATE_OUTCOME'),
+                  'full_gate': os.environ.get('FULL_GATE_OUTCOME'),
+              },
+              'log_tails': {
+                  'control_canary': tail('artifacts/current_control_canary.log'),
+                  'routed_canary': tail('artifacts/current_routed_canary.log'),
+                  'canary_compare': tail('artifacts/current_canary_comparison.log'),
+              },
+          }
+          Path('artifacts/retrieval_diagnostics.json').write_text(
+              json.dumps(report, indent=2) + '\n', encoding='utf-8'
+          )
+          PY
+
+      - name: Propose one bounded retrieval repair
+        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true'
+        id: proposal
+        continue-on-error: true
+        run: |
+          python -m ai_lca.retrieval_autonomous_iteration \
+            --diagnostics artifacts/retrieval_diagnostics.json \
+            --model "$OPENAI_REPAIR_MODEL" \
+            --reasoning-effort medium \
+            --max-context-chars 120000 \
+            --max-proposal-attempts 3 \
+            --history-file .autonomy/retrieval_rejection_history.jsonl \
+            --max-history-entries 12 \
+            --output-dir artifacts/retrieval_autonomous_iteration
+
+      - name: Detect proposed retrieval code change
+        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true'
+        id: repair_change
+        shell: bash
+        run: |
+          if git diff --quiet -- \
+            src/ai_lca/evidence_router.py \
+            src/ai_lca/retrieval_processor.py \
+            src/ai_lca/retrieval_replay.py \
+            src/ai_lca/retrieval_compare.py \
+            src/ai_lca/frozen_replay.py \
+            tests/test_evidence_router.py \
+            tests/test_retrieval_compare.py \
+            tests/test_frozen_replay.py; then
+            echo "has_change=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_change=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare patched canary states
+        if: steps.repair_change.outputs.has_change == 'true'
+        run: |
+          cp -a frozen_corpus patched_control_canary_state
+          cp -a frozen_corpus patched_routed_canary_state
+
+      - name: Run patched frozen control canary
+        if: steps.repair_change.outputs.has_change == 'true'
+        id: patched_control_canary
+        continue-on-error: true
+        run: |
+          python -m ai_lca.frozen_replay \
+            --mode control \
+            --state-dir patched_control_canary_state \
+            --manifest artifacts/frozen_replay_manifest.json \
+            --subset canary \
+            --max-total-calls 60 \
+            --max-calls-per-paper 10 \
+            --max-total-tokens 1000000 \
+            --max-estimated-cost-usd 0.75 \
+            --output artifacts/patched_control_canary.json
+
+      - name: Run patched frozen retrieval canary
+        if: steps.repair_change.outputs.has_change == 'true'
+        id: patched_routed_canary
+        continue-on-error: true
+        run: |
+          python -m ai_lca.frozen_replay \
+            --mode routed \
+            --state-dir patched_routed_canary_state \
+            --manifest artifacts/frozen_replay_manifest.json \
+            --subset canary \
+            --max-total-calls 60 \
+            --max-calls-per-paper 10 \
+            --max-total-tokens 1000000 \
+            --max-estimated-cost-usd 0.75 \
+            --output artifacts/patched_routed_canary.json
+
+      - name: Gate patched retrieval against canary control
+        if: steps.repair_change.outputs.has_change == 'true'
+        id: patched_canary_gate
+        continue-on-error: true
+        run: |
+          python -m ai_lca.retrieval_compare \
+            --control artifacts/patched_control_canary.json \
+            --routed artifacts/patched_routed_canary.json \
+            --control-state patched_control_canary_state \
+            --routed-state patched_routed_canary_state \
+            --manifest artifacts/frozen_replay_manifest.json \
+            --output artifacts/patched_canary_comparison.json
+
+      - name: Prepare patched full states
+        if: steps.repair_change.outputs.has_change == 'true' && steps.patched_canary_gate.outcome == 'success'
+        run: |
+          cp -a frozen_corpus patched_control_full_state
+          cp -a frozen_corpus patched_routed_full_state
+
+      - name: Run patched frozen control on all 44
+        if: steps.repair_change.outputs.has_change == 'true' && steps.patched_canary_gate.outcome == 'success'
+        id: patched_control_full
+        continue-on-error: true
+        run: |
+          python -m ai_lca.frozen_replay \
+            --mode control \
+            --state-dir patched_control_full_state \
+            --manifest artifacts/frozen_replay_manifest.json \
+            --subset full \
+            --max-total-calls 220 \
+            --max-calls-per-paper 10 \
+            --max-total-tokens 4000000 \
+            --max-estimated-cost-usd 3.00 \
+            --output artifacts/patched_control_full.json
+
+      - name: Run patched frozen retrieval on all 44
+        if: steps.repair_change.outputs.has_change == 'true' && steps.patched_canary_gate.outcome == 'success'
+        id: patched_routed_full
+        continue-on-error: true
+        run: |
+          python -m ai_lca.frozen_replay \
+            --mode routed \
+            --state-dir patched_routed_full_state \
+            --manifest artifacts/frozen_replay_manifest.json \
+            --subset full \
+            --max-total-calls 220 \
+            --max-calls-per-paper 10 \
+            --max-total-tokens 4000000 \
+            --max-estimated-cost-usd 3.00 \
+            --output artifacts/patched_routed_full.json
+
+      - name: Gate patched retrieval against full control
+        if: steps.repair_change.outputs.has_change == 'true' && steps.patched_canary_gate.outcome == 'success'
+        id: patched_full_gate
+        continue-on-error: true
+        run: |
+          python -m ai_lca.retrieval_compare \
+            --control artifacts/patched_control_full.json \
+            --routed artifacts/patched_routed_full.json \
+            --control-state patched_control_full_state \
+            --routed-state patched_routed_full_state \
+            --manifest artifacts/frozen_replay_manifest.json \
+            --output artifacts/patched_full_comparison.json
+
+      - name: Commit accepted retrieval repair
+        if: steps.repair_change.outputs.has_change == 'true' && steps.patched_full_gate.outcome == 'success'
+        shell: bash
+        run: |
+          git config user.name "ai-lca-retrieval-autonomous-development"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            src/ai_lca/evidence_router.py \
+            src/ai_lca/retrieval_processor.py \
+            src/ai_lca/retrieval_replay.py \
+            src/ai_lca/retrieval_compare.py \
+            src/ai_lca/frozen_replay.py \
+            tests/test_evidence_router.py \
+            tests/test_retrieval_compare.py \
+            tests/test_frozen_replay.py
+          git diff --cached --quiet && { echo "::error::No allowed retrieval change staged."; exit 5; }
+          git commit -m "Improve retrieval-before-reasoning autonomously"
+          git push origin HEAD:agent/retrieval-before-reasoning-clean
+
+      - name: Record rejected retrieval experiment
+        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true' && !(steps.repair_change.outputs.has_change == 'true' && steps.patched_full_gate.outcome == 'success')
+        env:
+          PROPOSAL_OUTCOME: ${{ steps.proposal.outcome }}
+          PATCHED_CANARY_OUTCOME: ${{ steps.patched_canary_gate.outcome }}
+          PATCHED_FULL_OUTCOME: ${{ steps.patched_full_gate.outcome }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def load(path):
+              p = Path(path)
+              if not p.exists():
+                  return {}
+              try:
+                  return json.loads(p.read_text(encoding='utf-8'))
+              except json.JSONDecodeError:
+                  return {}
+
+          iteration = load('artifacts/retrieval_autonomous_iteration/iteration.json')
+          comparison = load('artifacts/patched_full_comparison.json') or load('artifacts/patched_canary_comparison.json') or load('artifacts/current_canary_comparison.json')
+          reasons = []
+          for regression in comparison.get('regressions', []) or []:
+              reasons.extend(regression.get('reasons') or ([regression.get('reason')] if regression.get('reason') else []))
+          if not reasons:
+              reasons = [
+                  f"proposal={os.environ.get('PROPOSAL_OUTCOME')}",
+                  f"patched_canary={os.environ.get('PATCHED_CANARY_OUTCOME')}",
+                  f"patched_full={os.environ.get('PATCHED_FULL_OUTCOME')}",
+              ]
+          record = {
+              'run_id': os.environ.get('RUN_ID'),
+              'failure_class': 'RETRIEVAL_BEFORE_REASONING',
+              'summary': iteration.get('summary') or 'No accepted bounded retrieval repair',
+              'rationale': iteration.get('rationale') or 'The proposal or corpus gates did not yield an acceptable retrieval improvement.',
+              'rejected_at_gate': 'full' if os.environ.get('PATCHED_FULL_OUTCOME') == 'failure' else ('canary' if os.environ.get('PATCHED_CANARY_OUTCOME') == 'failure' else 'proposal'),
+              'regression_reasons': sorted(set(str(x) for x in reasons if x)),
+          }
+          history = Path('.autonomy/retrieval_rejection_history.jsonl')
+          history.parent.mkdir(parents=True, exist_ok=True)
+          with history.open('a', encoding='utf-8') as handle:
+              handle.write(json.dumps(record, sort_keys=True) + '\n')
+          PY
+          git restore -- \
+            src/ai_lca/evidence_router.py \
+            src/ai_lca/retrieval_processor.py \
+            src/ai_lca/retrieval_replay.py \
+            src/ai_lca/retrieval_compare.py \
+            src/ai_lca/frozen_replay.py \
+            tests/test_evidence_router.py \
+            tests/test_retrieval_compare.py \
+            tests/test_frozen_replay.py
+          git config user.name "ai-lca-retrieval-autonomous-development"
+          git config user.email "actions@users.noreply.github.com"
+          git add .autonomy/retrieval_rejection_history.jsonl
+          git diff --cached --quiet || git commit -m "Record rejected retrieval experiment"
+          git push origin HEAD:agent/retrieval-before-reasoning-clean
+
+      - name: Stop after rejection cap
+        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'false'
+        run: |
+          echo "::warning::Autonomous retrieval search stopped after 20 rejected experiments. Human review is required before spending more API budget."
+
+      - name: Upload iteration evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: retrieval-before-reasoning-${{ github.run_id }}
+          name: retrieval-autonomous-${{ github.run_id }}
           path: artifacts
           retention-days: 30
