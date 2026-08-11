@@ -81,7 +81,8 @@ Scientific integrity constraints are absolute:
 - prefer deterministic parsing/validation and reuse of existing evidence over larger prompts;
 - preserve the role-classified foreground architecture;
 - optimize improvement per API token, not raw model usage.
-Return ONLY a valid git unified diff in unified_diff. It must use standard headers exactly like `--- a/<path>` and `+++ b/<path>` followed by `@@` hunks. Do not use Markdown fences, `*** Begin Patch`, prose, or custom patch syntax inside unified_diff. Touch ONLY allowed files, include tests for behavior changes, and keep the patch small enough to review and revert."""
+Return ONLY a valid git unified diff in unified_diff. It must use standard headers exactly like `--- a/<path>` and `+++ b/<path>` followed by `@@` hunks. Do not use Markdown fences, `*** Begin Patch`, prose, or custom patch syntax inside unified_diff. Touch ONLY allowed files, include tests for behavior changes, and keep the patch small enough to review and revert.
+A no-op or prose-only response is not an acceptable repair proposal. If you cannot justify a safe general change from the supplied aggregate diagnostics and code, return an empty diff; the controller will reject it safely rather than applying speculative code."""
 
 
 def _load(path: Path) -> Any:
@@ -193,6 +194,54 @@ def _context(files: list[str], max_chars: int) -> str:
     return "".join(chunks)
 
 
+def _anonymized_failure_metrics(
+    diagnostics: dict[str, Any], target: str, max_rows: int = 8
+) -> list[dict[str, Any]]:
+    """Return high-signal aggregate examples without paper identity or text."""
+    keys = (
+        "process_count",
+        "candidate_count",
+        "modeled_candidate_count",
+        "candidate_coverage",
+        "ambiguous_or_missing_candidate_count",
+        "flow_count",
+        "amount_coverage",
+        "unit_coverage",
+        "evidence_type_counts",
+        "multi_process_assignment_count",
+        "duplicate_process_reference_count",
+    )
+    rows = [
+        row
+        for row in (diagnostics.get("papers") or [])
+        if target in (row.get("failure_classes") or [])
+    ]
+    rows.sort(
+        key=lambda row: (
+            -int(row.get("ambiguous_or_missing_candidate_count") or 0),
+            -int(row.get("candidate_count") or 0),
+        )
+    )
+    return [{key: row.get(key) for key in keys} for row in rows[:max_rows]]
+
+
+def _write_proposal_attempt(
+    output_dir: Path,
+    proposal: PatchProposal,
+    normalised_diff: str,
+    attempt: int,
+) -> None:
+    (output_dir / f"proposal_attempt_{attempt}.json").write_text(
+        proposal.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    (output_dir / f"proposal_attempt_{attempt}.raw.patch").write_text(
+        proposal.unified_diff.rstrip() + "\n", encoding="utf-8"
+    )
+    (output_dir / f"proposal_attempt_{attempt}.patch").write_text(
+        normalised_diff, encoding="utf-8"
+    )
+
+
 def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
     diagnostics = _load(args.diagnostics)
     ranking = diagnostics.get("failure_class_ranking") or []
@@ -202,44 +251,106 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
     allowed_files = TARGETS.get(target, DEFAULT_TARGETS)
     allowed = set(allowed_files)
     target_row = next((x for x in ranking if x["failure_class"] == target), ranking[0])
-    prompt = (
+    aggregate_examples = _anonymized_failure_metrics(diagnostics, target)
+    base_prompt = (
         f"FAILURE CLASS: {target}\n"
         f"AFFECTED PAPERS: {target_row.get('affected_papers')}\n"
         f"PRIORITY SCORE: {target_row.get('priority_score')}\n"
-        "Do not use or encode individual paper identities. The counts above are diagnostic only.\n\n"
+        "Do not use or encode individual paper identities. The counts and metrics below are diagnostic only.\n\n"
+        "ANONYMIZED AFFECTED-PAPER METRICS:\n"
+        f"{json.dumps(aggregate_examples, indent=2)}\n\n"
         f"ALLOWED FILES: {json.dumps(allowed_files)}\n"
         "Your unified_diff field must begin with `--- a/<path>` and `+++ b/<path>` and use standard `@@` hunks. Do not wrap it in Markdown.\n\n"
         "CURRENT CODE:\n"
         + _context(allowed_files, args.max_context_chars)
     )
     client = _client()
-    completion = client.beta.chat.completions.parse(
-        model=args.model,
-        reasoning_effort=args.reasoning_effort,
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
-        response_format=PatchProposal,
-    )
-    proposal = completion.choices[0].message.parsed
-    if proposal is None:
-        raise RuntimeError("repair model returned no structured proposal")
-
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    meta_path = args.output_dir / "proposal.json"
-    raw_patch_path = args.output_dir / "proposal.raw.patch"
-    patch_path = args.output_dir / "proposal.patch"
-    # Persist raw model evidence before validation so rejected attempts remain auditable.
-    meta_path.write_text(proposal.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    raw_patch_path.write_text(proposal.unified_diff.rstrip() + "\n", encoding="utf-8")
 
-    normalised_diff = _normalise_unified_diff(proposal.unified_diff)
-    normalised = proposal.model_copy(update={"unified_diff": normalised_diff})
-    patch_path.write_text(normalised_diff, encoding="utf-8")
-    _validate_patch(normalised, allowed)
+    accepted: PatchProposal | None = None
+    accepted_diff = ""
+    rejection_reasons: list[str] = []
+    attempts_used = 0
 
-    check = _run(["git", "apply", "--check", str(patch_path)], check=False)
-    if check.returncode:
-        raise RuntimeError("git apply --check failed: " + check.stderr[-2000:])
-    _run(["git", "apply", str(patch_path)])
+    for attempt in range(1, args.max_proposal_attempts + 1):
+        attempts_used = attempt
+        feedback = ""
+        if rejection_reasons:
+            feedback = (
+                "\n\nPREVIOUS PROPOSAL WAS REJECTED BY THE CONTROLLER:\n"
+                f"{rejection_reasons[-1]}\n"
+                "Return a corrected, small unified diff that satisfies the same scientific guardrails."
+            )
+        try:
+            completion = client.beta.chat.completions.parse(
+                model=args.model,
+                reasoning_effort=args.reasoning_effort,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": base_prompt + feedback},
+                ],
+                response_format=PatchProposal,
+            )
+            proposal = completion.choices[0].message.parsed
+        except (TypeError, ValueError) as exc:
+            rejection_reasons.append(
+                f"attempt {attempt}: structured proposal parse failed: {exc}"
+            )
+            continue
+
+        if proposal is None:
+            rejection_reasons.append(
+                f"attempt {attempt}: repair model returned no structured proposal"
+            )
+            continue
+
+        normalised_diff = _normalise_unified_diff(proposal.unified_diff)
+        normalised = proposal.model_copy(update={"unified_diff": normalised_diff})
+        _write_proposal_attempt(args.output_dir, proposal, normalised_diff, attempt)
+
+        try:
+            _validate_patch(normalised, allowed)
+        except ValueError as exc:
+            rejection_reasons.append(f"attempt {attempt}: {exc}")
+            continue
+
+        patch_path = args.output_dir / f"proposal_attempt_{attempt}.patch"
+        check = _run(["git", "apply", "--check", str(patch_path)], check=False)
+        if check.returncode:
+            rejection_reasons.append(
+                "attempt "
+                f"{attempt}: git apply --check failed: {(check.stderr or check.stdout)[-1200:]}"
+            )
+            continue
+
+        accepted = normalised
+        accepted_diff = normalised_diff
+        (args.output_dir / "proposal.json").write_text(
+            proposal.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+        (args.output_dir / "proposal.raw.patch").write_text(
+            proposal.unified_diff.rstrip() + "\n", encoding="utf-8"
+        )
+        (args.output_dir / "proposal.patch").write_text(
+            normalised_diff, encoding="utf-8"
+        )
+        _run(["git", "apply", str(patch_path)])
+        break
+
+    if accepted is None:
+        result = {
+            "failure_class": target,
+            "applied": False,
+            "proposal_attempts": attempts_used,
+            "rejection_reasons": rejection_reasons,
+            "allowed_files": allowed_files,
+            "message": "No valid bounded repair was produced; no code was changed and corpus gates should be skipped for this cycle.",
+        }
+        (args.output_dir / "iteration.json").write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+        )
+        print(json.dumps(result, indent=2))
+        return result
 
     tests = [
         "tests/test_jats.py",
@@ -261,10 +372,13 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
     status = _run(["git", "diff", "--stat"]).stdout
     result = {
         "failure_class": target,
-        "summary": proposal.summary,
-        "rationale": proposal.rationale,
+        "applied": True,
+        "proposal_attempts": attempts_used,
+        "rejection_reasons": rejection_reasons,
+        "summary": accepted.summary,
+        "rationale": accepted.rationale,
         "allowed_files": allowed_files,
-        "changed_paths": sorted(_changed_paths(normalised_diff)),
+        "changed_paths": sorted(_changed_paths(accepted_diff)),
         "diff_stat": status,
         "deterministic_tests_passed": True,
     }
@@ -276,13 +390,20 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bounded autonomous code proposal for corpus failure classes.")
+    parser = argparse.ArgumentParser(
+        description="Bounded autonomous code proposal for corpus failure classes."
+    )
     parser.add_argument("--diagnostics", type=Path, required=True)
     parser.add_argument("--failure-class")
-    parser.add_argument("--model", default=os.getenv("OPENAI_REPAIR_MODEL", "gpt-5-mini"))
+    parser.add_argument(
+        "--model", default=os.getenv("OPENAI_REPAIR_MODEL", "gpt-5-mini")
+    )
     parser.add_argument("--reasoning-effort", default="medium")
     parser.add_argument("--max-context-chars", type=int, default=90000)
-    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/autonomous_iteration"))
+    parser.add_argument("--max-proposal-attempts", type=int, default=3)
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("artifacts/autonomous_iteration")
+    )
     args = parser.parse_args()
     propose_and_apply(args)
 
