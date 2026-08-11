@@ -100,6 +100,7 @@ jobs:
               --source \
                 benchmarks/gerloff_2021/source_main_excerpt.txt \
                 benchmarks/gerloff_2021/source_supplement_machine_readable.txt \
+              --audit-source \
                 benchmarks/gerloff_2021/source_supplement_workbook.txt \
               --runs "$RUNS" \
               --model "$OPENAI_MODEL" \
