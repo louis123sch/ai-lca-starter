@@ -1,12 +1,6 @@
-name: Phase 1 autonomous literature scale runner
+name: Phase 1 literature scale runner (manual)
 
 on:
-  push:
-    branches: [phase1-literature-scale]
-    paths:
-      - ".github/workflows/literature-scale.yml"
-  schedule:
-    - cron: "17 * * * *"
   workflow_dispatch:
 
 concurrency:
