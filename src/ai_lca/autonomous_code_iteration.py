@@ -124,7 +124,6 @@ def _normalise_unified_diff(diff: str) -> str:
     """Accept common model formatting variants but emit one git-applyable form."""
     text = _strip_markdown_fence(diff)
     lines = text.splitlines()
-    # Ignore accidental prose before the first conventional patch header.
     first = next(
         (
             i
@@ -135,7 +134,6 @@ def _normalise_unified_diff(diff: str) -> str:
     )
     if first is not None:
         lines = lines[first:]
-    # Strip common apply_patch wrappers if the model ignored the output-format rule.
     lines = [
         line
         for line in lines
@@ -189,7 +187,7 @@ def _format_range(start: int, count: int) -> str:
 
 def _find_unique_sequence(haystack: list[str], needle: list[str]) -> int:
     if not needle:
-        raise ValueError("cannot repair a bare hunk with no original/context lines")
+        raise ValueError("cannot locate a hunk with no original/context lines")
     matches = [
         index
         for index in range(0, len(haystack) - len(needle) + 1)
@@ -197,18 +195,21 @@ def _find_unique_sequence(haystack: list[str], needle: list[str]) -> int:
     ]
     if len(matches) != 1:
         raise ValueError(
-            "cannot safely repair bare hunk header: "
+            "cannot safely locate hunk: "
             f"expected one exact source match, found {len(matches)}"
         )
     return matches[0]
 
 
 def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
-    """Deterministically add hunk ranges when a model emits bare ``@@`` headers.
+    """Canonicalize model hunk locations from exact source context.
 
-    The ranges are inferred only when the full original/context sequence has one
-    exact match in the target file. Ambiguous or non-matching hunks are rejected
-    rather than guessed.
+    A model may emit a bare ``@@`` header or valid-looking but incorrect line
+    numbers. When the full original/context sequence has exactly one match in
+    the target file, recompute the hunk ranges deterministically. If a numbered
+    hunk cannot be uniquely located, leave its declared range intact so
+    ``git apply --check`` can decide it. Bare or malformed hunks that cannot be
+    located are rejected rather than guessed.
     """
     lines = diff.splitlines()
     out: list[str] = []
@@ -231,18 +232,18 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
             continue
 
         valid = _HUNK_HEADER_RE.match(line)
-        if valid:
-            old_count = int(valid.group("old_count") or 1)
-            new_count = int(valid.group("new_count") or 1)
-            delta += new_count - old_count
-            out.append(line)
-            i += 1
-            continue
-
-        if line.strip() != "@@":
+        is_bare = line.strip() == "@@"
+        if not valid and not is_bare:
             raise ValueError(f"unsupported malformed hunk header: {line!r}")
         if not current_path or current_path == "/dev/null":
-            raise ValueError("cannot repair bare hunk without an existing target file")
+            if valid:
+                old_count = int(valid.group("old_count") or 1)
+                new_count = int(valid.group("new_count") or 1)
+                delta += new_count - old_count
+                out.append(line)
+                i += 1
+                continue
+            raise ValueError("cannot repair hunk without an existing target file")
 
         j = i + 1
         body: list[str] = []
@@ -260,13 +261,13 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
 
         old_lines: list[str] = []
         new_lines: list[str] = []
+        body_is_parseable = True
         for body_line in body:
             if body_line.startswith("\\ No newline at end of file"):
                 continue
             if not body_line or body_line[0] not in {" ", "+", "-"}:
-                raise ValueError(
-                    f"unsupported line in bare hunk body: {body_line!r}"
-                )
+                body_is_parseable = False
+                break
             prefix, text = body_line[0], body_line[1:]
             if prefix in {" ", "-"}:
                 old_lines.append(text)
@@ -274,22 +275,49 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
                 new_lines.append(text)
 
         source = root / current_path
+        match_index: int | None = None
+        locate_error: ValueError | None = None
+        if body_is_parseable and source.exists():
+            try:
+                match_index = _find_unique_sequence(
+                    source.read_text(encoding="utf-8").splitlines(), old_lines
+                )
+            except ValueError as exc:
+                locate_error = exc
+
+        if match_index is not None:
+            old_start = match_index + 1
+            new_start = old_start + delta
+            old_count = len(old_lines)
+            new_count = len(new_lines)
+            out.append(
+                "@@ "
+                f"-{_format_range(old_start, old_count)} "
+                f"+{_format_range(new_start, new_count)} @@"
+            )
+            out.extend(body)
+            delta += new_count - old_count
+            i = j
+            continue
+
+        if valid:
+            old_count = int(valid.group("old_count") or 1)
+            new_count = int(valid.group("new_count") or 1)
+            delta += new_count - old_count
+            out.append(line)
+            out.extend(body)
+            i = j
+            continue
+
+        if not body_is_parseable:
+            raise ValueError("unsupported line in bare hunk body")
         if not source.exists():
-            raise ValueError(f"cannot repair bare hunk; target file not found: {current_path}")
-        source_lines = source.read_text(encoding="utf-8").splitlines()
-        match_index = _find_unique_sequence(source_lines, old_lines)
-        old_start = match_index + 1
-        new_start = old_start + delta
-        old_count = len(old_lines)
-        new_count = len(new_lines)
-        out.append(
-            "@@ "
-            f"-{_format_range(old_start, old_count)} "
-            f"+{_format_range(new_start, new_count)} @@"
-        )
-        out.extend(body)
-        delta += new_count - old_count
-        i = j
+            raise ValueError(
+                f"cannot repair bare hunk; target file not found: {current_path}"
+            )
+        if locate_error is not None:
+            raise locate_error
+        raise ValueError("cannot safely locate bare hunk")
 
     return "\n".join(out).rstrip() + "\n"
 
