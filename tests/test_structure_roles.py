@@ -51,6 +51,22 @@ def test_assessed_alternatives_do_not_promote_shared_support_activity():
     assert {process.process_id for process in result.processes} == {"route_a", "route_b"}
 
 
+def test_parented_assessed_product_system_is_candidate_only():
+    result = lock_foreground_interpretation(
+        interpretation(
+            [
+                candidate("route", "Route", "assessed_product_system"),
+                candidate("route_scenario", "Route under scenario", "assessed_product_system", "route"),
+            ]
+        )
+    )
+    assert [process.process_id for process in result.processes] == ["route"]
+    assert any(
+        "Nested foreground activities require the interconnected_foreground_process role" in warning
+        for warning in result.assumptions_or_warnings
+    )
+
+
 def test_explicit_interconnected_foreground_process_is_retained():
     result = lock_foreground_interpretation(
         interpretation(
@@ -96,5 +112,18 @@ def test_parent_pointing_to_excluded_candidate_is_removed_conservatively():
             ]
         )
     )
-    assert result.processes[0].parent_process_id is None
-    assert any("non-foreground parent" in warning for warning in result.assumptions_or_warnings)
+    # A parented assessed system is now conservatively retained as a candidate only.
+    # With no lockable process remaining, the structural guard rejects the interpretation.
+    try:
+        lock_foreground_interpretation(
+            interpretation(
+                [
+                    candidate("main", "Main system", "assessed_product_system", "support"),
+                    candidate("support", "Shared support", "shared_supporting_activity"),
+                ]
+            )
+        )
+    except RuntimeError as exc:
+        assert "No candidate was classified" in str(exc)
+    else:
+        raise AssertionError("Expected an interpretation with no lockable foreground process to fail")
