@@ -1,4 +1,4 @@
-from ai_lca.controlled_accuracy import candidate_risks
+from ai_lca.controlled_accuracy import candidate_risks, final_flow_risk
 
 
 def a(disposition="modeled_inventory"):
@@ -33,3 +33,27 @@ def test_direct_inventory_co2_emission_is_not_flagged():
         "table": "LCI",
     }
     assert candidate_risks(candidate, a()) == []
+    flow = {"name": "Carbon dioxide emission", "amount": 0.42, "unit": "kg CO2"}
+    assert final_flow_risk(flow, candidate, a()) is False
+
+
+def test_final_midpoint_result_flow_is_flagged():
+    candidate = {
+        "evidence_type": "table_row",
+        "evidence_text": "70,000 | 0.092 | 0.267 | 0.137",
+        "context": "caption=Total environmental impact of the scenarios to principal midpoint categories and sensitivity of environmental impact results",
+        "table": "Table 5",
+    }
+    flow = {"name": "Climate change", "amount": 0.267, "unit": "kg CO2 eq"}
+    assert final_flow_risk(flow, candidate, a()) is True
+
+
+def test_normal_input_in_result_discussion_is_not_a_final_lcia_flow():
+    candidate = {
+        "evidence_type": "table_row",
+        "evidence_text": "Grid electricity | 2.0 kWh",
+        "context": "caption=Environmental impact sensitivity scenarios",
+        "table": "Table 8",
+    }
+    flow = {"name": "Electricity, high voltage", "amount": 2.0, "unit": "kWh"}
+    assert final_flow_risk(flow, candidate, a()) is False
