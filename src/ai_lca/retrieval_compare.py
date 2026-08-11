@@ -9,6 +9,9 @@ from .corpus_diagnostics import BASELINE_MANIFEST, load_baseline_papers
 from .inventory_replay import _paper_dir
 
 
+BENCHMARK_INCOMPLETE_STATUSES = {"BUDGET_STOP", "INFRASTRUCTURE_FAILURE"}
+
+
 def _read(path: Path, default: Any = None) -> Any:
     if not path.exists():
         return default
@@ -85,6 +88,12 @@ def compare_reports(
     foreground flows. When candidate IDs are available, every lost flow candidate
     must be explicitly covered by the router's safe-exclusion set; loss of any other
     source-supported foreground-flow candidate is a hard regression.
+
+    A/B arms that stop for budget or infrastructure reasons are *censored benchmark
+    observations*, not extraction regressions. They make the benchmark incomplete and
+    therefore cannot pass the gate, but they are kept separate from scientific
+    regression reasons so the repair agent does not try to "fix" retrieval in response
+    to an execution-budget artefact.
     """
 
     control_rows = _result_map(control)
@@ -92,16 +101,39 @@ def compare_reports(
     regressions: list[dict[str, Any]] = []
     improvements: list[dict[str, Any]] = []
     unchanged: list[str] = []
+    incomplete_pairs: list[dict[str, Any]] = []
 
     for doi in sorted(set(control_rows) | set(routed_rows)):
         old = control_rows.get(doi)
         new = routed_rows.get(doi)
         if old is None or new is None:
-            regressions.append({"doi": doi, "reason": "missing control or routed result", "control": old, "routed": new})
+            incomplete_pairs.append(
+                {
+                    "doi": doi,
+                    "reason": "missing control or routed result",
+                    "control_status": None if old is None else old.get("status"),
+                    "routed_status": None if new is None else new.get("status"),
+                }
+            )
             continue
 
-        old_complete = old.get("status") == "COMPLETE"
-        new_complete = new.get("status") == "COMPLETE"
+        old_status = str(old.get("status") or "")
+        new_status = str(new.get("status") or "")
+        if old_status in BENCHMARK_INCOMPLETE_STATUSES or new_status in BENCHMARK_INCOMPLETE_STATUSES:
+            incomplete_pairs.append(
+                {
+                    "doi": doi,
+                    "reason": "benchmark arm did not complete",
+                    "control_status": old_status,
+                    "routed_status": new_status,
+                    "control_error": old.get("error"),
+                    "routed_error": new.get("error"),
+                }
+            )
+            continue
+
+        old_complete = old_status == "COMPLETE"
+        new_complete = new_status == "COMPLETE"
         old_amb = int(old.get("ambiguous_or_missing_candidate_count") or 0)
         new_amb = int(new.get("ambiguous_or_missing_candidate_count") or 0)
         old_coverage = float(old.get("candidate_coverage") or 0.0)
@@ -191,10 +223,30 @@ def compare_reports(
     safety_pass = bool(audit.get("inventory_safety_pass")) and int(audit.get("unsafe_exclusion_count") or 0) == 0
     efficiency_noninferior = routed_tokens <= control_tokens and routed_cost <= control_cost + 1e-9
     quality_improved = bool(improvements)
-    pass_gate = safety_pass and not regressions and (quality_improved or efficiency_noninferior)
+    benchmark_complete = not incomplete_pairs
+    pass_gate = (
+        safety_pass
+        and benchmark_complete
+        and not regressions
+        and (quality_improved or efficiency_noninferior)
+    )
+
+    if not benchmark_complete:
+        failure_mode = "benchmark_incomplete"
+    elif regressions:
+        failure_mode = "quality_regression"
+    elif not safety_pass:
+        failure_mode = "router_safety_failure"
+    elif not (quality_improved or efficiency_noninferior):
+        failure_mode = "no_quality_or_efficiency_gain"
+    else:
+        failure_mode = None
 
     return {
         "pass_gate": pass_gate,
+        "failure_mode": failure_mode,
+        "benchmark_complete": benchmark_complete,
+        "benchmark_incomplete_pairs": incomplete_pairs,
         "router_safety_pass": safety_pass,
         "quality_improved": quality_improved,
         "efficiency_noninferior": efficiency_noninferior,
