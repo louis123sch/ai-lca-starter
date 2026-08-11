@@ -9,10 +9,12 @@ from typing import Any, Literal
 from .autonomous_literature import (
     ApiRunner,
     Budget,
+    CandidateAssignmentBatch,
     ForegroundStructure,
     RunConfig,
     StateStore,
     _load_model,
+    _write_json,
 )
 from .corpus_diagnostics import BASELINE_MANIFEST
 from .inventory_replay import (
@@ -30,6 +32,20 @@ from .retrieval_replay import (
 ReplayMode = Literal["control", "routed"]
 
 
+MIN_FAIR_AB_CALLS_PER_PAPER = 20
+
+
+def fair_ab_calls_per_paper(requested: int, max_total_calls: int) -> int:
+    """Give each A/B paper enough headroom to produce a comparable result.
+
+    A per-paper cap that censors one arm creates a benchmark artefact rather than a
+    meaningful quality comparison. The run-level call/token/cost caps remain hard,
+    so raising this local ceiling cannot make an experiment unbounded.
+    """
+
+    return min(max_total_calls, max(requested, MIN_FAIR_AB_CALLS_PER_PAPER))
+
+
 class FrozenStructureMixin:
     """Force replay to use the exact frozen foreground graph in both A/B arms."""
 
@@ -43,11 +59,23 @@ class FrozenStructureMixin:
 
 
 class FrozenControlProcessor(FrozenStructureMixin, TargetedReplayProcessor):
-    pass
+    def _assign(self, doi, source_hash, structure, candidates, paper_dir):  # noqa: ANN001
+        assignments, missing = super()._assign(doi, source_hash, structure, candidates, paper_dir)
+        _write_json(
+            paper_dir / "extraction" / "replay_control_assignments.json",
+            CandidateAssignmentBatch(assignments=assignments),
+        )
+        return assignments, missing
 
 
 class FrozenRoutedProcessor(FrozenStructureMixin, RoutedTargetedReplayProcessor):
-    pass
+    def _assign(self, doi, source_hash, structure, candidates, paper_dir):  # noqa: ANN001
+        assignments, missing = super()._assign(doi, source_hash, structure, candidates, paper_dir)
+        _write_json(
+            paper_dir / "extraction" / "retrieval" / "replay_assignments.json",
+            CandidateAssignmentBatch(assignments=assignments),
+        )
+        return assignments, missing
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -87,6 +115,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             return report
 
+    effective_per_paper_cap = fair_ab_calls_per_paper(
+        args.max_calls_per_paper,
+        args.max_total_calls,
+    )
     config = RunConfig(
         state_dir=args.state_dir,
         screen_model=args.screen_model,
@@ -95,7 +127,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         max_process_workers=args.max_process_workers,
         max_paper_workers=1,
         max_total_calls=args.max_total_calls,
-        max_calls_per_paper=args.max_calls_per_paper,
+        max_calls_per_paper=effective_per_paper_cap,
         max_total_tokens=args.max_total_tokens,
         max_estimated_cost_usd=args.max_estimated_cost_usd,
         max_repair_calls_per_process=1,
@@ -122,6 +154,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "results": results,
         "comparison": comparison,
         "usage": budget.summary(),
+        "benchmark_limits": {
+            "requested_max_calls_per_paper": args.max_calls_per_paper,
+            "effective_max_calls_per_paper": effective_per_paper_cap,
+            "max_total_calls": args.max_total_calls,
+            "max_total_tokens": args.max_total_tokens,
+            "max_estimated_cost_usd": args.max_estimated_cost_usd,
+        },
     }
     if router_audit is not None:
         report["router_audit"] = router_audit
@@ -135,6 +174,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "paper_count": len(dois),
                 "comparison": comparison,
                 "usage": budget.summary(),
+                "benchmark_limits": report["benchmark_limits"],
                 "router_safety_pass": None if router_audit is None else router_audit["inventory_safety_pass"],
             },
             indent=2,
