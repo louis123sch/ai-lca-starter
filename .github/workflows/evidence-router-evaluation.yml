@@ -1,0 +1,66 @@
+name: Evidence router evaluation
+
+on:
+  pull_request:
+    paths:
+      - "src/ai_lca/evidence_router.py"
+      - "tests/test_evidence_router.py"
+      - ".github/workflows/evidence-router-evaluation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BASELINE_RUN_ID: "31473783816"
+  BASELINE_ARTIFACT: "phase1-scale-31473783816"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package
+        run: python -m pip install -e ".[test]"
+      - name: Deterministic tests
+        run: python -m pytest -q tests/test_evidence_router.py
+      - name: Restore exact frozen 44-paper corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-scale-31473783816
+          path: corpus_baseline_state
+          repository: louis123sch/ai-lca-starter
+          run-id: 31473783816
+          github-token: ${{ github.token }}
+      - name: Evaluate leave-one-paper-out routing
+        run: |
+          mkdir -p artifacts
+          python -m ai_lca.evidence_router \
+            --state-dir corpus_baseline_state \
+            --output artifacts/evidence_router_eval.json
+      - name: Enforce shadow-mode safety
+        run: |
+          python - <<'PY'
+          import json
+          report = json.load(open('artifacts/evidence_router_eval.json'))
+          assert report['paper_count'] == 44, report['paper_count']
+          assert report['labelled_candidates'] >= 2000, report['labelled_candidates']
+          # This first experiment is intentionally shadow-only. A production
+          # filtering gate must not be enabled until measured positive recall
+          # is >= 0.99 on the frozen corpus and structural/full replay also pass.
+          print('shadow_recall=', report['positive_recall_if_low_route_skipped'])
+          print('candidate_reduction=', report['candidate_reduction_rate'])
+          PY
+      - name: Upload router evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-router-${{ github.run_id }}
+          path: artifacts
+          retention-days: 30
