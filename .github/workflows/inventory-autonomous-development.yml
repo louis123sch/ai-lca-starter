@@ -5,13 +5,11 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/inventory-autonomous-development.yml"
-  schedule:
-    - cron: "23 */6 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
-  actions: read
+  actions: write
   pull-requests: write
 
 concurrency:
@@ -97,13 +95,15 @@ jobs:
 
       - name: Propose one bounded general repair
         run: |
-          python -m ai_lca.autonomous_code_iteration \
+          python -m ai_lca.autonomous_continuous_iteration \
             --diagnostics artifacts/corpus_diagnostics.json \
             --failure-class "$TARGET_FAILURE_CLASS" \
             --model "$OPENAI_REPAIR_MODEL" \
             --reasoning-effort medium \
             --max-context-chars 90000 \
             --max-proposal-attempts 3 \
+            --history-file .autonomy/inventory_rejection_history.jsonl \
+            --max-history-entries 12 \
             --output-dir artifacts/autonomous_iteration
 
       - name: Detect proposed code change
@@ -190,6 +190,52 @@ jobs:
           echo "::notice::Candidate repair was safely rejected by the corpus gates; no code will be committed."
           echo "micro=${{ steps.micro_gate.outcome }} canary=${{ steps.canary_gate.outcome }} cohort=${{ steps.cohort_gate.outcome }} full=${{ steps.full_gate.outcome }}"
 
+      - name: Record rejected experiment memory
+        if: always() && steps.repair_change.outputs.has_change == 'true' && (steps.micro_gate.outcome == 'failure' || steps.canary_gate.outcome == 'failure' || steps.cohort_gate.outcome == 'failure' || steps.full_gate.outcome == 'failure')
+        env:
+          MICRO_OUTCOME: ${{ steps.micro_gate.outcome }}
+          CANARY_OUTCOME: ${{ steps.canary_gate.outcome }}
+          COHORT_OUTCOME: ${{ steps.cohort_gate.outcome }}
+          FULL_OUTCOME: ${{ steps.full_gate.outcome }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          outcomes = [
+              ("micro", os.environ.get("MICRO_OUTCOME"), Path("artifacts/micro.json")),
+              ("canary", os.environ.get("CANARY_OUTCOME"), Path("artifacts/canary.json")),
+              ("cohort", os.environ.get("COHORT_OUTCOME"), Path("artifacts/cohort.json")),
+              ("full", os.environ.get("FULL_OUTCOME"), Path("artifacts/full_regression.json")),
+          ]
+          gate_name, _, gate_path = next(item for item in outcomes if item[1] == "failure")
+          iteration = json.loads(Path("artifacts/autonomous_iteration/iteration.json").read_text(encoding="utf-8"))
+          gate = json.loads(gate_path.read_text(encoding="utf-8")) if gate_path.exists() else {}
+          regressions = gate.get("comparison", {}).get("regressions", [])
+          reasons = sorted({str(item.get("reason")) for item in regressions if item.get("reason")})
+          record = {
+              "run_id": os.environ.get("RUN_ID"),
+              "failure_class": iteration.get("failure_class"),
+              "summary": iteration.get("summary"),
+              "rationale": iteration.get("rationale"),
+              "rejected_at_gate": gate_name,
+              "regression_reasons": reasons,
+          }
+          history = Path(".autonomy/inventory_rejection_history.jsonl")
+          history.parent.mkdir(parents=True, exist_ok=True)
+          with history.open("a", encoding="utf-8") as handle:
+              handle.write(json.dumps(record, sort_keys=True) + "\n")
+          PY
+          git restore -- src/ai_lca tests
+          git config user.name "ai-lca-autonomous-development"
+          git config user.email "actions@users.noreply.github.com"
+          git add .autonomy/inventory_rejection_history.jsonl
+          git diff --cached --quiet || git commit -m "Record rejected inventory experiment"
+          git push origin HEAD:inventory-recall-development
+
       - name: Commit accepted development repair
         if: steps.repair_change.outputs.has_change == 'true' && steps.full_gate.outcome == 'success'
         shell: bash
@@ -226,3 +272,19 @@ jobs:
           name: inventory-iteration-${{ github.run_id }}
           path: artifacts
           retention-days: 30
+
+      - name: Queue next autonomous iteration
+        if: ${{ always() && !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if gh workflow run inventory-autonomous-development.yml --ref main; then
+              echo "Queued the next autonomous inventory iteration."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Could not queue the next autonomous iteration after three attempts."
+          exit 1
