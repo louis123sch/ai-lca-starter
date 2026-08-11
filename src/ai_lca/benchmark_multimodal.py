@@ -24,12 +24,16 @@ def run_multimodal_benchmark(
     model: str | None,
     output_dir: Path,
     max_visual_assets: int = 24,
+    audit_source_paths: list[Path] | None = None,
 ):
     """Run the benchmark through the audited multimodal document path."""
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not set. Configure it before running the live benchmark.")
 
     documents = [(path.name, path.read_bytes()) for path in source_paths]
+    audit_documents = [
+        (path.name, path.read_bytes()) for path in (audit_source_paths or [])
+    ]
     expected = load_expected(expected_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     reports = []
@@ -37,6 +41,7 @@ def run_multimodal_benchmark(
     for n in range(1, runs + 1):
         extraction = extract_inventory_from_documents_audited(
             documents,
+            audit_documents=audit_documents,
             model=model,
             extra_instructions=BENCHMARK_EXTRA_INSTRUCTIONS,
             max_visual_assets=max_visual_assets,
@@ -73,6 +78,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Multimodal paper-grounded AI-LCA benchmark")
     parser.add_argument("--expected", required=True, type=Path)
     parser.add_argument("--source", required=True, nargs="+", type=Path)
+    parser.add_argument(
+        "--audit-source",
+        nargs="*",
+        type=Path,
+        default=[],
+        help="Supplementary inventory evidence used only by the completeness audit, not foreground locking.",
+    )
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--model")
     parser.add_argument("--max-visual-assets", type=int, default=24)
@@ -85,6 +97,7 @@ def main() -> None:
         model=args.model,
         output_dir=args.output_dir,
         max_visual_assets=args.max_visual_assets,
+        audit_source_paths=args.audit_source,
     )
 
 
