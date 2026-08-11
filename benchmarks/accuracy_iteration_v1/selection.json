@@ -1,0 +1,17 @@
+{
+  "baseline_id": "corpus_baseline_v1_1_2026-08-11",
+  "failure_class": "MODELED_NONINVENTORY_TABLE_RISK",
+  "single_doi": "10.1007/s11367-023-02274-7",
+  "single_reason": "A baseline COMPLETE paper contains modeled allocation/method-comparison table rows, giving a clean one-paper false-positive test.",
+  "canary_dois": [
+    "10.1007/s11367-023-02274-7",
+    "10.1007/s11367-024-02375-x",
+    "10.1007/s11367-025-02445-8",
+    "10.1007/s11367-025-02453-8",
+    "10.1007/s11367-025-02512-0",
+    "10.1007/s11367-025-02517-9",
+    "10.1007/s11367-025-02561-5",
+    "10.1007/s11367-026-02631-2"
+  ],
+  "policy": "Run single first. Run canary only after reviewing and accepting the single-paper report. Never dispatch automatically."
+}
