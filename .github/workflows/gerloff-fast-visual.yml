@@ -117,4 +117,4 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-# Iteration trigger: validate locked-process flow attachment enforcement before any full benchmark.
+# Iteration trigger: recheck context-dilution stability after locked-flow attachment patch before full benchmark.
