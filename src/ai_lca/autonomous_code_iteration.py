@@ -206,7 +206,8 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
 
     A model may emit a bare ``@@`` header or valid-looking but incorrect line
     numbers. When the full original/context sequence has exactly one match in
-    the target file, recompute the hunk ranges deterministically. If a numbered
+    the target file, recompute the hunk ranges deterministically. Context-only
+    no-op hunks are dropped because they carry no proposed change. If a numbered
     hunk cannot be uniquely located, leave its declared range intact so
     ``git apply --check`` can decide it. Bare or malformed hunks that cannot be
     located are rejected rather than guessed.
@@ -258,6 +259,15 @@ def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
                 break
             body.append(lines[j])
             j += 1
+
+        has_change = any(
+            body_line.startswith(("+", "-"))
+            and not body_line.startswith(("+++", "---"))
+            for body_line in body
+        )
+        if not has_change:
+            i = j
+            continue
 
         old_lines: list[str] = []
         new_lines: list[str] = []
