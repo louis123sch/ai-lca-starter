@@ -73,3 +73,27 @@ def test_bounded_chunks_preserve_provenance_sections():
     assert any("[PAGE 1]" in chunk for chunk in chunks)
     assert any("[PAGE 2]" in chunk for chunk in chunks)
     assert all(len(chunk) <= 80 or chunk.startswith("[PAGE") for chunk in chunks)
+
+
+def test_merge_collapses_component_material_parenthetical_variant():
+    merged = merge_supported_flows(
+        [flow("bipolar plate (titanium for bipolar plate)", amount=528, unit="kg")],
+        [flow("titanium for bipolar plate", amount=528, unit="kg")],
+    )
+    assert len(merged) == 1
+
+
+def test_merge_keeps_distinct_materials_for_same_component():
+    merged = merge_supported_flows(
+        [flow("electrode frame (chromium steel for electrode frame)", amount=10, unit="kg")],
+        [flow("electrode frame (nickel for electrode frame)", amount=2, unit="kg")],
+    )
+    assert len(merged) == 2
+
+
+def test_merge_treats_incl_parenthetical_as_explanatory_duplicate():
+    merged = merge_supported_flows(
+        [flow("diaphragm compressor", amount=100, unit="kg")],
+        [flow("diaphragm compressor (incl. frequency converter)", amount=100, unit="kg")],
+    )
+    assert len(merged) == 1

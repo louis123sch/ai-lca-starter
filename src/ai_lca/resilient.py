@@ -29,6 +29,7 @@ Rules:
 9. Do not emit both an intermediate calculation/plant-total row and its explicitly reported final functional-unit-normalised row as separate flows when the source makes clear they represent the same inventory contribution. Prefer the final modeled basis; retain both only when the source explicitly models them as distinct exchanges.
 10. Column-unit suffixes, row numbers, counts, or explanatory qualifiers are source evidence, not reasons to duplicate an inventory item already recovered from the same process and direction.
 11. Calculation coefficients, conversion factors, lifetime production totals used only for normalisation, and cells explicitly marked as absent (for example '-') are not inventory exchanges. Do not emit them as flows unless the source explicitly models them as an exchange.
+12. When a row labels one exchange as `component (material for component)`, treat that as one material exchange; do not emit separate parent and parenthetical variants unless the source explicitly models both.
 """
 
 
@@ -44,7 +45,7 @@ def _normalise_name(value: str) -> str:
     value = re.sub(r"^\s*\d+[\s.)-]+(?=\S)", "", value)
     value = _UNIT_SUFFIX_RE.sub(" ", value)
     # Counts and explanatory parentheticals are useful evidence but should not create duplicate identities.
-    value = re.sub(r"\((?:\s*\d+\s*(?:x|×)?\s*|including[^)]*|rectifier[^)]*|de-oxo[^)]*)\)", " ", value)
+    value = re.sub(r"\((?:\s*\d+\s*(?:x|×)?\s*|(?:including|incl\.?)[^)]*|rectifier[^)]*|de-oxo[^)]*)\)", " ", value)
     value = re.sub(r"[^a-z0-9]+", " ", value)
     return re.sub(r"\s+", " ", value).strip()
 
@@ -71,6 +72,29 @@ def _manufacturing_energy_identity(flow: InventoryFlow) -> str | None:
     if re.search(r"\b(?:bop|balance of plant)\b", residual):
         return "manufacturing energy bop"
     return None
+
+
+def _embedded_material_identity(flow: InventoryFlow) -> str | None:
+    """Treat `component (material for component)` as the material exchange, not two identities.
+
+    The rule is deliberately structural and source-agnostic: it activates only when a trailing
+    parenthetical contains a `... for ...` material-style label whose target overlaps the
+    outer component label. This collapses presentation variants while retaining distinct
+    materials for the same component.
+    """
+    match = re.search(r"\(([^()]*)\)\s*$", flow.name or "")
+    if not match:
+        return None
+    inner = _normalise_name(match.group(1))
+    outer = _normalise_name((flow.name or "")[: match.start()])
+    if " for " not in f" {inner} " or not outer:
+        return None
+    _, target = inner.split(" for ", 1)
+    outer_tokens = {token for token in outer.split() if len(token) >= 4}
+    target_tokens = {token for token in target.split() if len(token) >= 4}
+    if not (outer_tokens & target_tokens):
+        return None
+    return inner
 
 
 def _is_non_exchange_calculation_metadata(flow: InventoryFlow) -> bool:
@@ -101,7 +125,7 @@ def _is_non_exchange_calculation_metadata(flow: InventoryFlow) -> bool:
 
 
 def _flow_identity(flow: InventoryFlow) -> tuple[str, str, str]:
-    semantic = _manufacturing_energy_identity(flow)
+    semantic = _manufacturing_energy_identity(flow) or _embedded_material_identity(flow)
     return flow.process_id.casefold().strip(), semantic or _normalise_name(flow.name), flow.direction
 
 
