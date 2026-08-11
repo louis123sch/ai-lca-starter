@@ -81,7 +81,7 @@ Scientific integrity constraints are absolute:
 - prefer deterministic parsing/validation and reuse of existing evidence over larger prompts;
 - preserve the role-classified foreground architecture;
 - optimize improvement per API token, not raw model usage.
-Return a valid git unified diff that touches ONLY allowed files. Include tests for behavior changes. Keep the patch small enough to review and revert."""
+Return ONLY a valid git unified diff in unified_diff. It must use standard headers exactly like `--- a/<path>` and `+++ b/<path>` followed by `@@` hunks. Do not use Markdown fences, `*** Begin Patch`, prose, or custom patch syntax inside unified_diff. Touch ONLY allowed files, include tests for behavior changes, and keep the patch small enough to review and revert."""
 
 
 def _load(path: Path) -> Any:
@@ -92,11 +92,73 @@ def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
     return subprocess.run(cmd, text=True, capture_output=True, check=check)
 
 
+def _strip_markdown_fence(diff: str) -> str:
+    text = diff.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().lower() in {"```", "```diff", "```patch"}:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _normalise_header_path(raw: str, prefix: str) -> str:
+    value = raw.strip().split("\t", 1)[0].strip()
+    if value == "/dev/null":
+        return value
+    if value.startswith('"') and value.endswith('"'):
+        value = value[1:-1]
+    if value.startswith(("a/", "b/")):
+        value = value[2:]
+    return f"{prefix}/{value}"
+
+
+def _normalise_unified_diff(diff: str) -> str:
+    """Accept common model formatting variants but emit one git-applyable form."""
+    text = _strip_markdown_fence(diff)
+    lines = text.splitlines()
+    # Ignore accidental prose before the first conventional patch header.
+    first = next(
+        (
+            i
+            for i, line in enumerate(lines)
+            if line.startswith("diff --git ") or line.startswith("--- ")
+        ),
+        None,
+    )
+    if first is not None:
+        lines = lines[first:]
+    normalised: list[str] = []
+    for line in lines:
+        if line.startswith("--- "):
+            normalised.append("--- " + _normalise_header_path(line[4:], "a"))
+        elif line.startswith("+++ "):
+            normalised.append("+++ " + _normalise_header_path(line[4:], "b"))
+        else:
+            normalised.append(line)
+    return "\n".join(normalised).rstrip() + "\n"
+
+
 def _changed_paths(diff: str) -> set[str]:
-    paths = set()
-    for line in diff.splitlines():
-        if line.startswith("+++ b/"):
-            paths.add(line[6:].strip())
+    paths: set[str] = set()
+    text = _normalise_unified_diff(diff)
+    for line in text.splitlines():
+        if line.startswith("+++ "):
+            value = line[4:].strip().split("\t", 1)[0].strip().strip('"')
+            if value == "/dev/null":
+                continue
+            if value.startswith("b/"):
+                value = value[2:]
+            paths.add(value)
+    if not paths:
+        for line in text.splitlines():
+            if not line.startswith("diff --git "):
+                continue
+            match = re.match(r"diff --git a/(.+?) b/(.+)$", line)
+            if match:
+                paths.add(match.group(2).strip().strip('"'))
     return paths
 
 
@@ -106,7 +168,10 @@ def _validate_patch(proposal: PatchProposal, allowed: set[str]) -> None:
         raise ValueError("proposal contains no changed file paths")
     if paths - allowed:
         raise ValueError(f"proposal touched disallowed paths: {sorted(paths - allowed)}")
-    if set(proposal.files_touched) - allowed:
+    metadata_paths = {
+        p[2:] if p.startswith(("a/", "b/")) else p for p in proposal.files_touched
+    }
+    if metadata_paths - allowed:
         raise ValueError("proposal metadata contains disallowed paths")
     if any(path.startswith(FORBIDDEN_PREFIXES) for path in paths):
         raise ValueError("proposal attempted to change protected project data/infrastructure")
@@ -136,15 +201,14 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
     target = args.failure_class or ranking[0]["failure_class"]
     allowed_files = TARGETS.get(target, DEFAULT_TARGETS)
     allowed = set(allowed_files)
-    target_row = next(
-        (x for x in ranking if x["failure_class"] == target), ranking[0]
-    )
+    target_row = next((x for x in ranking if x["failure_class"] == target), ranking[0])
     prompt = (
         f"FAILURE CLASS: {target}\n"
         f"AFFECTED PAPERS: {target_row.get('affected_papers')}\n"
         f"PRIORITY SCORE: {target_row.get('priority_score')}\n"
         "Do not use or encode individual paper identities. The counts above are diagnostic only.\n\n"
         f"ALLOWED FILES: {json.dumps(allowed_files)}\n"
+        "Your unified_diff field must begin with `--- a/<path>` and `+++ b/<path>` and use standard `@@` hunks. Do not wrap it in Markdown.\n\n"
         "CURRENT CODE:\n"
         + _context(allowed_files, args.max_context_chars)
     )
@@ -152,22 +216,25 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
     completion = client.beta.chat.completions.parse(
         model=args.model,
         reasoning_effort=args.reasoning_effort,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
         response_format=PatchProposal,
     )
     proposal = completion.choices[0].message.parsed
     if proposal is None:
         raise RuntimeError("repair model returned no structured proposal")
-    _validate_patch(proposal, allowed)
 
-    patch_path = args.output_dir / "proposal.patch"
-    meta_path = args.output_dir / "proposal.json"
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    patch_path.write_text(proposal.unified_diff.rstrip() + "\n", encoding="utf-8")
+    meta_path = args.output_dir / "proposal.json"
+    raw_patch_path = args.output_dir / "proposal.raw.patch"
+    patch_path = args.output_dir / "proposal.patch"
+    # Persist raw model evidence before validation so rejected attempts remain auditable.
     meta_path.write_text(proposal.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    raw_patch_path.write_text(proposal.unified_diff.rstrip() + "\n", encoding="utf-8")
+
+    normalised_diff = _normalise_unified_diff(proposal.unified_diff)
+    normalised = proposal.model_copy(update={"unified_diff": normalised_diff})
+    patch_path.write_text(normalised_diff, encoding="utf-8")
+    _validate_patch(normalised, allowed)
 
     check = _run(["git", "apply", "--check", str(patch_path)], check=False)
     if check.returncode:
@@ -180,6 +247,7 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
         "tests/test_flow_audit.py",
         "tests/test_corpus_diagnostics.py",
         "tests/test_inventory_replay.py",
+        "tests/test_autonomous_code_iteration.py",
     ]
     existing_tests = [p for p in tests if Path(p).exists()]
     test_run = _run(["python", "-m", "pytest", "-q", *existing_tests], check=False)
@@ -196,7 +264,7 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
         "summary": proposal.summary,
         "rationale": proposal.rationale,
         "allowed_files": allowed_files,
-        "changed_paths": sorted(_changed_paths(proposal.unified_diff)),
+        "changed_paths": sorted(_changed_paths(normalised_diff)),
         "diff_stat": status,
         "deterministic_tests_passed": True,
     }
@@ -208,19 +276,13 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Bounded autonomous code proposal for corpus failure classes."
-    )
+    parser = argparse.ArgumentParser(description="Bounded autonomous code proposal for corpus failure classes.")
     parser.add_argument("--diagnostics", type=Path, required=True)
     parser.add_argument("--failure-class")
-    parser.add_argument(
-        "--model", default=os.getenv("OPENAI_REPAIR_MODEL", "gpt-5-mini")
-    )
+    parser.add_argument("--model", default=os.getenv("OPENAI_REPAIR_MODEL", "gpt-5-mini"))
     parser.add_argument("--reasoning-effort", default="medium")
     parser.add_argument("--max-context-chars", type=int, default=90000)
-    parser.add_argument(
-        "--output-dir", type=Path, default=Path("artifacts/autonomous_iteration")
-    )
+    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/autonomous_iteration"))
     args = parser.parse_args()
     propose_and_apply(args)
 
