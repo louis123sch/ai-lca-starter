@@ -71,6 +71,10 @@ FORBIDDEN_PATCH_PATTERNS = (
     r"lower.{0,20}(threshold|target)",
     r"disable.{0,20}(check|validation|gate)",
 )
+_HUNK_HEADER_RE = re.compile(
+    r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
+    r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@(?: .*)?$"
+)
 SYSTEM_PROMPT = """You are a conservative software repair agent for an evidence-grounded life-cycle inventory extractor.
 Propose ONE small, general architectural improvement for the supplied recurring failure class.
 Scientific integrity constraints are absolute:
@@ -81,7 +85,7 @@ Scientific integrity constraints are absolute:
 - prefer deterministic parsing/validation and reuse of existing evidence over larger prompts;
 - preserve the role-classified foreground architecture;
 - optimize improvement per API token, not raw model usage.
-Return ONLY a valid git unified diff in unified_diff. It must use standard headers exactly like `--- a/<path>` and `+++ b/<path>` followed by `@@` hunks. Do not use Markdown fences, `*** Begin Patch`, prose, or custom patch syntax inside unified_diff. Touch ONLY allowed files, include tests for behavior changes, and keep the patch small enough to review and revert.
+Return ONLY a valid git unified diff in unified_diff. It must use standard headers exactly like `--- a/<path>` and `+++ b/<path>` followed by numbered hunks such as `@@ -120,7 +120,9 @@`. Do not use bare `@@` hunk headers. Do not use Markdown fences, `*** Begin Patch`, prose, or custom patch syntax inside unified_diff. Touch ONLY allowed files, include tests for behavior changes, and keep the patch small enough to review and revert.
 A no-op or prose-only response is not an acceptable repair proposal. If you cannot justify a safe general change from the supplied aggregate diagnostics and code, return an empty diff; the controller will reject it safely rather than applying speculative code."""
 
 
@@ -131,6 +135,13 @@ def _normalise_unified_diff(diff: str) -> str:
     )
     if first is not None:
         lines = lines[first:]
+    # Strip common apply_patch wrappers if the model ignored the output-format rule.
+    lines = [
+        line
+        for line in lines
+        if line.strip() not in {"*** Begin Patch", "*** End Patch"}
+        and not line.startswith("*** Update File:")
+    ]
     normalised: list[str] = []
     for line in lines:
         if line.startswith("--- "):
@@ -163,6 +174,126 @@ def _changed_paths(diff: str) -> set[str]:
     return paths
 
 
+def _patch_target_path(header: str) -> str:
+    value = header[4:].strip().split("\t", 1)[0].strip().strip('"')
+    if value == "/dev/null":
+        return value
+    if value.startswith(("a/", "b/")):
+        value = value[2:]
+    return value
+
+
+def _format_range(start: int, count: int) -> str:
+    return f"{start},{count}"
+
+
+def _find_unique_sequence(haystack: list[str], needle: list[str]) -> int:
+    if not needle:
+        raise ValueError("cannot repair a bare hunk with no original/context lines")
+    matches = [
+        index
+        for index in range(0, len(haystack) - len(needle) + 1)
+        if haystack[index : index + len(needle)] == needle
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "cannot safely repair bare hunk header: "
+            f"expected one exact source match, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _repair_bare_hunk_headers(diff: str, root: Path = Path(".")) -> str:
+    """Deterministically add hunk ranges when a model emits bare ``@@`` headers.
+
+    The ranges are inferred only when the full original/context sequence has one
+    exact match in the target file. Ambiguous or non-matching hunks are rejected
+    rather than guessed.
+    """
+    lines = diff.splitlines()
+    out: list[str] = []
+    current_path: str | None = None
+    delta = 0
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("+++ "):
+            current_path = _patch_target_path(line)
+            delta = 0
+            out.append(line)
+            i += 1
+            continue
+
+        if not line.startswith("@@"):
+            out.append(line)
+            i += 1
+            continue
+
+        valid = _HUNK_HEADER_RE.match(line)
+        if valid:
+            old_count = int(valid.group("old_count") or 1)
+            new_count = int(valid.group("new_count") or 1)
+            delta += new_count - old_count
+            out.append(line)
+            i += 1
+            continue
+
+        if line.strip() != "@@":
+            raise ValueError(f"unsupported malformed hunk header: {line!r}")
+        if not current_path or current_path == "/dev/null":
+            raise ValueError("cannot repair bare hunk without an existing target file")
+
+        j = i + 1
+        body: list[str] = []
+        while j < len(lines):
+            if lines[j].startswith("@@"):
+                break
+            if (
+                lines[j].startswith("--- ")
+                and j + 1 < len(lines)
+                and lines[j + 1].startswith("+++ ")
+            ):
+                break
+            body.append(lines[j])
+            j += 1
+
+        old_lines: list[str] = []
+        new_lines: list[str] = []
+        for body_line in body:
+            if body_line.startswith("\\ No newline at end of file"):
+                continue
+            if not body_line or body_line[0] not in {" ", "+", "-"}:
+                raise ValueError(
+                    f"unsupported line in bare hunk body: {body_line!r}"
+                )
+            prefix, text = body_line[0], body_line[1:]
+            if prefix in {" ", "-"}:
+                old_lines.append(text)
+            if prefix in {" ", "+"}:
+                new_lines.append(text)
+
+        source = root / current_path
+        if not source.exists():
+            raise ValueError(f"cannot repair bare hunk; target file not found: {current_path}")
+        source_lines = source.read_text(encoding="utf-8").splitlines()
+        match_index = _find_unique_sequence(source_lines, old_lines)
+        old_start = match_index + 1
+        new_start = old_start + delta
+        old_count = len(old_lines)
+        new_count = len(new_lines)
+        out.append(
+            "@@ "
+            f"-{_format_range(old_start, old_count)} "
+            f"+{_format_range(new_start, new_count)} @@"
+        )
+        out.extend(body)
+        delta += new_count - old_count
+        i = j
+
+    return "\n".join(out).rstrip() + "\n"
+
+
 def _validate_patch(proposal: PatchProposal, allowed: set[str]) -> None:
     paths = _changed_paths(proposal.unified_diff)
     if not paths:
@@ -176,6 +307,10 @@ def _validate_patch(proposal: PatchProposal, allowed: set[str]) -> None:
         raise ValueError("proposal metadata contains disallowed paths")
     if any(path.startswith(FORBIDDEN_PREFIXES) for path in paths):
         raise ValueError("proposal attempted to change protected project data/infrastructure")
+    if any(path.startswith("src/") for path in paths) and not any(
+        path.startswith("tests/") for path in paths
+    ):
+        raise ValueError("source behavior changes must include a test-file change")
     for pattern in FORBIDDEN_PATCH_PATTERNS:
         if re.search(pattern, proposal.unified_diff, re.IGNORECASE | re.DOTALL):
             raise ValueError(f"proposal violates anti-overfitting policy: {pattern}")
@@ -260,7 +395,7 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
         "ANONYMIZED AFFECTED-PAPER METRICS:\n"
         f"{json.dumps(aggregate_examples, indent=2)}\n\n"
         f"ALLOWED FILES: {json.dumps(allowed_files)}\n"
-        "Your unified_diff field must begin with `--- a/<path>` and `+++ b/<path>` and use standard `@@` hunks. Do not wrap it in Markdown.\n\n"
+        "Your unified_diff field must begin with `--- a/<path>` and `+++ b/<path>` and use numbered standard hunks such as `@@ -120,7 +120,9 @@`. Do not wrap it in Markdown.\n\n"
         "CURRENT CODE:\n"
         + _context(allowed_files, args.max_context_chars)
     )
@@ -305,6 +440,17 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
             continue
 
         normalised_diff = _normalise_unified_diff(proposal.unified_diff)
+        try:
+            normalised_diff = _repair_bare_hunk_headers(normalised_diff)
+        except ValueError as exc:
+            _write_proposal_attempt(
+                args.output_dir, proposal, normalised_diff, attempt
+            )
+            rejection_reasons.append(
+                f"attempt {attempt}: patch normalization failed: {exc}"
+            )
+            continue
+
         normalised = proposal.model_copy(update={"unified_diff": normalised_diff})
         _write_proposal_attempt(args.output_dir, proposal, normalised_diff, attempt)
 
@@ -315,7 +461,9 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
             continue
 
         patch_path = args.output_dir / f"proposal_attempt_{attempt}.patch"
-        check = _run(["git", "apply", "--check", str(patch_path)], check=False)
+        check = _run(
+            ["git", "apply", "--recount", "--check", str(patch_path)], check=False
+        )
         if check.returncode:
             rejection_reasons.append(
                 "attempt "
@@ -334,7 +482,7 @@ def propose_and_apply(args: argparse.Namespace) -> dict[str, Any]:
         (args.output_dir / "proposal.patch").write_text(
             normalised_diff, encoding="utf-8"
         )
-        _run(["git", "apply", str(patch_path)])
+        _run(["git", "apply", "--recount", str(patch_path)])
         break
 
     if accepted is None:
