@@ -1,0 +1,69 @@
+name: Gerloff bounded dedupe patch
+
+on:
+  push:
+    branches:
+      - feat/gerloff-fast-visual-regression
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/gerloff-fast-visual-regression
+          fetch-depth: 0
+      - name: Apply bounded generic duplicate-identity patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/ai_lca/resilient.py')
+          text = path.read_text()
+          marker = 'def _embedded_material_identity(flow: InventoryFlow) -> str | None:'
+          if marker not in text:
+              text = text.replace(
+                  '    value = re.sub(r"\\((?:\\s*\\d+\\s*(?:x|×)?\\s*|including[^)]*|rectifier[^)]*|de-oxo[^)]*)\\)", " ", value)\n',
+                  '    value = re.sub(r"\\((?:\\s*\\d+\\s*(?:x|×)?\\s*|(?:including|incl\\.?)[^)]*|rectifier[^)]*|de-oxo[^)]*)\\)", " ", value)\n',
+              )
+              helper = '''\n\ndef _embedded_material_identity(flow: InventoryFlow) -> str | None:\n    """Treat `component (material for component)` as the material exchange, not two identities.\n\n    The rule is deliberately structural and source-agnostic: it activates only when a trailing\n    parenthetical contains a `... for ...` material-style label whose target overlaps the\n    outer component label. This collapses presentation variants while retaining distinct\n    materials for the same component.\n    """\n    match = re.search(r"\\(([^()]*)\\)\\s*$", flow.name or "")\n    if not match:\n        return None\n    inner = _normalise_name(match.group(1))\n    outer = _normalise_name((flow.name or "")[: match.start()])\n    if " for " not in f" {inner} " or not outer:\n        return None\n    _, target = inner.split(" for ", 1)\n    outer_tokens = {token for token in outer.split() if len(token) >= 4}\n    target_tokens = {token for token in target.split() if len(token) >= 4}\n    if not (outer_tokens & target_tokens):\n        return None\n    return inner\n'''
+              anchor = '\n\ndef _is_non_exchange_calculation_metadata(flow: InventoryFlow) -> bool:\n'
+              if anchor not in text:
+                  raise SystemExit('helper insertion anchor not found')
+              text = text.replace(anchor, helper + anchor, 1)
+              old = '    semantic = _manufacturing_energy_identity(flow)\n    return flow.process_id.casefold().strip(), semantic or _normalise_name(flow.name), flow.direction\n'
+              new = '    semantic = _manufacturing_energy_identity(flow) or _embedded_material_identity(flow)\n    return flow.process_id.casefold().strip(), semantic or _normalise_name(flow.name), flow.direction\n'
+              if old not in text:
+                  raise SystemExit('flow identity anchor not found')
+              text = text.replace(old, new, 1)
+              rule = '12. When a row labels one exchange as `component (material for component)`, treat that as one material exchange; do not emit separate parent and parenthetical variants unless the source explicitly models both.\n'
+              prompt_anchor = '11. Calculation coefficients, conversion factors, lifetime production totals used only for normalisation, and cells explicitly marked as absent (for example \'-\') are not inventory exchanges. Do not emit them as flows unless the source explicitly models them as an exchange.\n'
+              if rule not in text and prompt_anchor in text:
+                  text = text.replace(prompt_anchor, prompt_anchor + rule, 1)
+              path.write_text(text)
+
+          test_path = Path('tests/test_resilient.py')
+          tests = test_path.read_text()
+          test_marker = 'def test_merge_collapses_component_material_parenthetical_variant():'
+          if test_marker not in tests:
+              tests += '''\n\ndef test_merge_collapses_component_material_parenthetical_variant():\n    merged = merge_supported_flows(\n        [flow("bipolar plate (titanium for bipolar plate)", amount=528, unit="kg")],\n        [flow("titanium for bipolar plate", amount=528, unit="kg")],\n    )\n    assert len(merged) == 1\n\n\ndef test_merge_keeps_distinct_materials_for_same_component():\n    merged = merge_supported_flows(\n        [flow("electrode frame (chromium steel for electrode frame)", amount=10, unit="kg")],\n        [flow("electrode frame (nickel for electrode frame)", amount=2, unit="kg")],\n    )\n    assert len(merged) == 2\n\n\ndef test_merge_treats_incl_parenthetical_as_explanatory_duplicate():\n    merged = merge_supported_flows(\n        [flow("diaphragm compressor", amount=100, unit="kg")],\n        [flow("diaphragm compressor (incl. frequency converter)", amount=100, unit="kg")],\n    )\n    assert len(merged) == 1\n'''
+              test_path.write_text(tests)
+          PY
+          python -m pytest -q tests/test_resilient.py
+      - name: Commit bounded patch
+        shell: bash
+        run: |
+          if git diff --quiet -- src/ai_lca/resilient.py tests/test_resilient.py; then
+            echo "No patch needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ai_lca/resilient.py tests/test_resilient.py
+          git commit -m "Deduplicate component-material presentation variants"
+          git push origin HEAD:feat/gerloff-fast-visual-regression
