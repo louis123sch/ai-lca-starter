@@ -60,6 +60,24 @@ jobs:
           run-id: 31473783816
           github-token: ${{ github.token }}
 
+      - name: Materialize immutable replay manifest
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from ai_lca.corpus_diagnostics import BASELINE_MANIFEST, load_baseline_papers
+
+          baseline_id, papers = load_baseline_papers(Path('frozen_corpus'), BASELINE_MANIFEST)
+          manifest = json.loads(BASELINE_MANIFEST.read_text(encoding='utf-8'))
+          manifest['baseline_id'] = baseline_id
+          manifest['papers'] = papers
+          Path('artifacts/frozen_replay_manifest.json').write_text(
+              json.dumps(manifest, indent=2) + '\n', encoding='utf-8'
+          )
+          assert len(papers) == 44, len(papers)
+          PY
+
       - name: Run deterministic tests
         run: |
           python -m compileall -q app.py src tests
@@ -67,17 +85,16 @@ jobs:
 
       - name: Audit router against all 44 frozen papers before any API calls
         run: |
-          mkdir -p artifacts
           python - <<'PY'
           import json
           from pathlib import Path
           from ai_lca.inventory_replay import select_dois
           from ai_lca.retrieval_replay import audit_router
-          from ai_lca.corpus_diagnostics import BASELINE_MANIFEST
 
           state = Path('frozen_corpus')
-          dois = select_dois(state_dir=state, manifest=BASELINE_MANIFEST, subset='full')
-          audit = audit_router(state, BASELINE_MANIFEST, dois)
+          manifest = Path('artifacts/frozen_replay_manifest.json')
+          dois = select_dois(state_dir=state, manifest=manifest, subset='full')
+          audit = audit_router(state, manifest, dois)
           Path('artifacts/router_audit_full.json').write_text(json.dumps(audit, indent=2) + '\n', encoding='utf-8')
           summary = {k: v for k, v in audit.items() if k != 'per_paper'}
           print(json.dumps(summary, indent=2))
@@ -98,11 +115,12 @@ jobs:
           python -m ai_lca.frozen_replay \
             --mode control \
             --state-dir control_canary_state \
+            --manifest artifacts/frozen_replay_manifest.json \
             --subset canary \
-            --max-total-calls 30 \
-            --max-calls-per-paper 7 \
-            --max-total-tokens 500000 \
-            --max-estimated-cost-usd 0.45 \
+            --max-total-calls 60 \
+            --max-calls-per-paper 10 \
+            --max-total-tokens 1000000 \
+            --max-estimated-cost-usd 0.75 \
             --output artifacts/control_canary.json
 
       - name: Run frozen-structure retrieval on identical canary
@@ -112,11 +130,12 @@ jobs:
           python -m ai_lca.frozen_replay \
             --mode routed \
             --state-dir routed_canary_state \
+            --manifest artifacts/frozen_replay_manifest.json \
             --subset canary \
-            --max-total-calls 30 \
-            --max-calls-per-paper 7 \
-            --max-total-tokens 500000 \
-            --max-estimated-cost-usd 0.45 \
+            --max-total-calls 60 \
+            --max-calls-per-paper 10 \
+            --max-total-tokens 1000000 \
+            --max-estimated-cost-usd 0.75 \
             --output artifacts/routed_canary.json
 
       - name: Gate retrieval against canary control
@@ -127,6 +146,7 @@ jobs:
             --routed artifacts/routed_canary.json \
             --control-state control_canary_state \
             --routed-state routed_canary_state \
+            --manifest artifacts/frozen_replay_manifest.json \
             --output artifacts/canary_comparison.json
 
       - name: Prepare independent full-corpus control and retrieval states
@@ -143,11 +163,12 @@ jobs:
           python -m ai_lca.frozen_replay \
             --mode control \
             --state-dir control_full_state \
+            --manifest artifacts/frozen_replay_manifest.json \
             --subset full \
-            --max-total-calls 110 \
-            --max-calls-per-paper 8 \
-            --max-total-tokens 2000000 \
-            --max-estimated-cost-usd 1.50 \
+            --max-total-calls 220 \
+            --max-calls-per-paper 10 \
+            --max-total-tokens 4000000 \
+            --max-estimated-cost-usd 3.00 \
             --output artifacts/control_full.json
 
       - name: Run frozen-structure retrieval on all 44 papers
@@ -158,11 +179,12 @@ jobs:
           python -m ai_lca.frozen_replay \
             --mode routed \
             --state-dir routed_full_state \
+            --manifest artifacts/frozen_replay_manifest.json \
             --subset full \
-            --max-total-calls 110 \
-            --max-calls-per-paper 8 \
-            --max-total-tokens 2000000 \
-            --max-estimated-cost-usd 1.50 \
+            --max-total-calls 220 \
+            --max-calls-per-paper 10 \
+            --max-total-tokens 4000000 \
+            --max-estimated-cost-usd 3.00 \
             --output artifacts/routed_full.json
 
       - name: Gate retrieval against full control
@@ -173,6 +195,7 @@ jobs:
             --routed artifacts/routed_full.json \
             --control-state control_full_state \
             --routed-state routed_full_state \
+            --manifest artifacts/frozen_replay_manifest.json \
             --output artifacts/full_comparison.json
 
       - name: Upload experiment evidence
