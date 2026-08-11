@@ -42,6 +42,11 @@ def _evidence_supported(flow: InventoryFlow, source_text: str) -> bool:
     return bool(evidence) and evidence in source
 
 
+def _safe_audit_input(flow: InventoryFlow) -> bool:
+    """Keep the audit additive but prevent it from manufacturing other exchange classes."""
+    return flow.direction == "input" and flow.linked_process_id is None
+
+
 def merge_missing_flows(
     initial: list[InventoryFlow],
     audited: list[InventoryFlow],
@@ -56,6 +61,8 @@ def merge_missing_flows(
 
     for flow in audited:
         if _normalise(flow.process_id) not in allowed:
+            continue
+        if not _safe_audit_input(flow):
             continue
         if not _evidence_supported(flow, source_text):
             continue
