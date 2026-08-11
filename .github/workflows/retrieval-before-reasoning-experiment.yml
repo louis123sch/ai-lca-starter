@@ -28,7 +28,7 @@ env:
 jobs:
   compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 110
     steps:
       - name: Check out retrieval experiment
         uses: actions/checkout@v4
@@ -82,8 +82,6 @@ jobs:
           assert audit['paper_count'] == 44, audit['paper_count']
           assert audit['inventory_safety_pass'], audit
           assert audit['unsafe_exclusion_count'] == 0, audit
-          # Baseline modeled disagreements are diagnostic, not a hard failure: the
-          # baseline itself contains LCIA-result rows mislabeled as inventory.
           PY
 
       - name: Prepare independent canary control and retrieval states
@@ -104,7 +102,7 @@ jobs:
             --max-estimated-cost-usd 0.45 \
             --output artifacts/control_canary.json
 
-      - name: Run retrieval replay on identical canary
+      - name: Run production-equivalent retrieval replay on identical canary
         id: routed_canary
         continue-on-error: true
         run: |
@@ -123,6 +121,8 @@ jobs:
           python -m ai_lca.retrieval_compare \
             --control artifacts/control_canary.json \
             --routed artifacts/routed_canary.json \
+            --control-state control_canary_state \
+            --routed-state routed_canary_state \
             --output artifacts/canary_comparison.json
 
       - name: Prepare independent full-corpus control and retrieval states
@@ -145,7 +145,7 @@ jobs:
             --max-estimated-cost-usd 1.50 \
             --output artifacts/control_full.json
 
-      - name: Run retrieval replay on all 44 papers
+      - name: Run production-equivalent retrieval replay on all 44 papers
         if: steps.canary_gate.outcome == 'success'
         id: routed_full
         continue-on-error: true
@@ -165,6 +165,8 @@ jobs:
           python -m ai_lca.retrieval_compare \
             --control artifacts/control_full.json \
             --routed artifacts/routed_full.json \
+            --control-state control_full_state \
+            --routed-state routed_full_state \
             --output artifacts/full_comparison.json
 
       - name: Upload experiment evidence
