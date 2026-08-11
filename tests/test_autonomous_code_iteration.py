@@ -8,6 +8,7 @@ from ai_lca import autonomous_code_iteration as iteration
 from ai_lca.autonomous_code_iteration import (
     PatchProposal,
     _anonymized_failure_metrics,
+    _apply_exact_patch,
     _changed_paths,
     _normalise_unified_diff,
     _repair_bare_hunk_headers,
@@ -126,6 +127,54 @@ def test_repair_bare_hunk_rejects_ambiguous_context(tmp_path) -> None:
 """
     with pytest.raises(ValueError, match="found 2"):
         _repair_bare_hunk_headers(diff, root=tmp_path)
+
+
+def test_exact_patch_ignores_line_numbers_and_applies_unique_content(tmp_path) -> None:
+    source = tmp_path / "src" / "ai_lca" / "example.py"
+    test_file = tmp_path / "tests" / "test_example.py"
+    source.parent.mkdir(parents=True)
+    test_file.parent.mkdir(parents=True)
+    source.write_text("zero\none\ntwo\nthree\n", encoding="utf-8")
+    test_file.write_text("assert 'old'\n", encoding="utf-8")
+    diff = """--- a/src/ai_lca/example.py
++++ b/src/ai_lca/example.py
+@@ -999,3 +999,3 @@
+ one
+-two
++TWO
+ three
+--- a/tests/test_example.py
++++ b/tests/test_example.py
+@@ -500,1 +500,1 @@
+-assert 'old'
++assert 'new'
+"""
+    _apply_exact_patch(diff, root=tmp_path)
+    assert source.read_text(encoding="utf-8") == "zero\none\nTWO\nthree\n"
+    assert test_file.read_text(encoding="utf-8") == "assert 'new'\n"
+
+
+def test_exact_patch_is_atomic_on_later_ambiguous_hunk(tmp_path) -> None:
+    first = tmp_path / "src" / "ai_lca" / "first.py"
+    second = tmp_path / "src" / "ai_lca" / "second.py"
+    first.parent.mkdir(parents=True)
+    first.write_text("old\n", encoding="utf-8")
+    second.write_text("same\nsame\n", encoding="utf-8")
+    diff = """--- a/src/ai_lca/first.py
++++ b/src/ai_lca/first.py
+@@ -1 +1 @@
+-old
++new
+--- a/src/ai_lca/second.py
++++ b/src/ai_lca/second.py
+@@ -1 +1,2 @@
+ same
++extra
+"""
+    with pytest.raises(ValueError, match="found 2"):
+        _apply_exact_patch(diff, root=tmp_path)
+    assert first.read_text(encoding="utf-8") == "old\n"
+    assert second.read_text(encoding="utf-8") == "same\nsame\n"
 
 
 def test_guardrail_blocks_benchmark_specific_patch() -> None:
