@@ -15,10 +15,11 @@ on:
       - "tests/test_frozen_replay.py"
       - ".autonomy/retrieval_rejection_history.jsonl"
       - ".github/workflows/retrieval-before-reasoning-experiment.yml"
+  workflow_dispatch:
 
 permissions:
   contents: write
-  actions: read
+  actions: write
   pull-requests: write
 
 concurrency:
@@ -523,6 +524,14 @@ jobs:
           git add .autonomy/retrieval_rejection_history.jsonl
           git diff --cached --quiet || git commit -m "Record rejected retrieval experiment"
           git push origin HEAD:agent/retrieval-before-reasoning-clean
+
+      - name: Explicitly dispatch next retrieval iteration
+        if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run retrieval-before-reasoning-experiment.yml \
+            --ref agent/retrieval-before-reasoning-clean
 
       - name: Stop after rejection cap
         if: steps.repair_needed.outputs.value == 'true' && steps.rejection_cap.outputs.allow == 'false'
