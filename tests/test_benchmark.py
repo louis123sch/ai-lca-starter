@@ -120,3 +120,35 @@ def test_published_result_comparison_is_zero_for_paper_values():
     )
     assert comparison["matched_results"] == 9
     assert comparison["mean_absolute_percent_error"] == 0.0
+
+
+
+def test_process_matching_prefers_more_specific_substring_candidate():
+    from types import SimpleNamespace
+
+    from ai_lca.benchmark import _score_name, _unique_match
+
+    expected = [
+        {"name": "Transport to waste treatment", "aliases": ["Transport to waste treatment"]},
+        {"name": "Waste treatment", "aliases": ["Waste treatment"]},
+    ]
+    actual = [
+        SimpleNamespace(name="Transport to waste treatment (C2)"),
+        SimpleNamespace(name="Waste treatment (C3)"),
+    ]
+    matches, missing, extra = _unique_match(
+        expected,
+        actual,
+        lambda e, a: _score_name(a.name, e["aliases"]),
+        0.60,
+    )
+    assert matches == {0: 0, 1: 1}
+    assert missing == []
+    assert extra == []
+
+
+def test_expected_child_process_is_not_reported_as_unexpected_child():
+    extraction = _perfect_extraction()
+    extraction.processes[0].parent_process_id = "assessed_product_system"
+    report = evaluate_extraction(extraction, _expected())
+    assert not any("unexpected child process" in name for name in report.forbidden_processes)

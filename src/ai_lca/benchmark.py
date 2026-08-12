@@ -94,9 +94,16 @@ def _score_name(name: str, aliases: list[str]) -> float:
         elif a_core and b_core and a_core == b_core:
             scores.append(0.97)
         elif min(len(a), len(b)) >= 5 and (a in b or b in a):
-            scores.append(0.93)
+            # Reward substring equivalence while preferring the more specific label.
+            # This avoids assigning a qualified activity to a shorter generic activity
+            # when both would otherwise receive an identical substring score.
+            a_tokens, b_tokens = a.split(), b.split()
+            closeness = min(len(a_tokens), len(b_tokens)) / max(len(a_tokens), len(b_tokens))
+            scores.append(0.90 + 0.03 * closeness)
         elif min(len(a_core), len(b_core)) >= 5 and (a_core in b_core or b_core in a_core):
-            scores.append(0.91)
+            a_tokens, b_tokens = a_core.split(), b_core.split()
+            closeness = min(len(a_tokens), len(b_tokens)) / max(len(a_tokens), len(b_tokens))
+            scores.append(0.88 + 0.03 * closeness)
         else:
             scores.append(max(
                 SequenceMatcher(None, a, b).ratio(),
@@ -199,7 +206,7 @@ def evaluate_extraction(extraction: InventoryExtraction, expected: dict[str, Any
         is_expected_match = process_index in matched_process_indices
         if not is_expected_match and any(term in _norm(process.name) for term in forbidden_terms if term):
             forbidden_processes.append(process.name)
-        if process.parent_process_id:
+        if process.parent_process_id and not is_expected_match:
             forbidden_processes.append(f"{process.name} (unexpected child process)")
     bad_flow_terms = [_norm(x) for x in expected.get("forbidden_foreground_name_terms", [])]
     forbidden_names = sorted({f.name for f in extraction.flows if any(term in _norm(f.name) for term in bad_flow_terms if term)})
