@@ -1,0 +1,54 @@
+name: Validate recovered Mycelium 99.5 candidate
+
+on:
+  push:
+    branches:
+      - agent/mycelium-995-validated
+    paths:
+      - .github/workflows/validate-mycelium-995.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5.6
+      OPENAI_VISION_MODEL: gpt-5.6
+      OPENAI_REASONING_EFFORT: medium
+      AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+      AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
+    steps:
+      - name: Check out clean integration branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/mycelium-995-validated
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: python -m pip install -e ".[test]"
+
+      - name: Verify OpenAI secret
+        run: test -n "$OPENAI_API_KEY"
+
+      - name: Validate candidate without rerunning Mycelium
+        run: python scripts/validate_mycelium_995_candidate.py
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mycelium-995-regression-validation-${{ github.run_id }}
+          path: artifacts/mycelium_995_validation
+          if-no-files-found: warn
+          retention-days: 30
