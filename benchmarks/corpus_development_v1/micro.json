@@ -1,9 +1,9 @@
 {
-  "baseline_id": "corpus_baseline_v1_2026-08-11",
+  "baseline_id": "corpus_lca_title_22_2026-08-12",
   "canary_dois": [
     "10.1007/s11367-025-02453-8",
     "10.1007/s11367-025-02524-w",
-    "10.1007/s11367-026-02685-2"
+    "10.1007/s11367-026-02671-8"
   ],
-  "purpose": "Lowest-cost replay gate: two high-complexity unresolved cases plus one resolved regression control."
+  "purpose": "Lowest-cost replay gate: two unresolved active-corpus cases plus one resolved regression control."
 }
