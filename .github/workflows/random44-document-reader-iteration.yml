@@ -1,0 +1,58 @@
+name: Random-44 document reader iteration
+
+on:
+  push:
+    branches: [agent/document-reader-random44-1]
+    paths:
+      - '.control/random44-reader-target'
+
+concurrency:
+  group: random44-reader-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5-mini
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install package
+        run: python -m pip install -e '.[test]'
+      - name: Deterministic preflight
+        run: python -m pytest -q
+      - name: Verify OpenAI secret
+        shell: bash
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo 'Missing OPENAI_API_KEY' >&2; exit 2; }
+      - name: Download frozen 44-paper corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-scale-31473783816
+          path: frozen_corpus
+          github-token: ${{ github.token }}
+          run-id: 31473783816
+      - name: Run one read-improve-reread comparison
+        run: |
+          python scripts/random44_document_reader_iteration.py \
+            --artifact-root frozen_corpus \
+            --output-dir random44_reader_iteration \
+            --model "$OPENAI_MODEL"
+      - name: Upload comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: random44-reader-${{ github.run_id }}
+          path: random44_reader_iteration
+          if-no-files-found: warn
+          retention-days: 30
