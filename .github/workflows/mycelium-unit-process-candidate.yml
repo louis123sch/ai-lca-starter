@@ -1,0 +1,139 @@
+name: Mycelium unit-process candidate
+
+on:
+  push:
+    branches: [agent/mycelium-unit-process-regression]
+    paths:
+      - ".github/workflows/mycelium-unit-process-candidate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5-mini
+      OPENAI_VISION_MODEL: gpt-5-mini
+      AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+      AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/mycelium-unit-process-regression
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[test]"
+      - name: Apply narrow candidate rule
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/ai_lca/llm.py')
+          s=p.read_text()
+          old="5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity, normally through its own reference product/reference unit or an explicit quantified foreground exchange. Do not manufacture a reference product to justify promotion."
+          new="""5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity, normally through its own reference product/reference unit or an explicit quantified foreground exchange. Do not manufacture a reference product to justify promotion.\n5a. An explicit foreground LCI table can itself provide that evidence when it names distinct unit processes and gives each process its own quantitative inventory, especially where intermediate rows are explicitly labelled as internal flows between those named unit processes. In that case, retain the source-named unit processes as interconnected_foreground_process activities rather than collapsing the quantified unit-process model into one product-system node.\n5b. This exception is evidence-specific: do NOT promote boxes from a process-flow diagram, descriptive unit operations, life-cycle-module headings, equipment/component lists, or background database activities unless the source also provides the distinct foreground-unit-process inventory or explicit quantified inter-process exchange described above."""
+          if new in s:
+              print('Candidate rule already present')
+          elif old in s:
+              p.write_text(s.replace(old,new,1))
+              print('Applied candidate rule')
+          else:
+              raise SystemExit('Expected prompt rule not found')
+          PY
+      - name: Deterministic tests
+        run: python -m pytest -q
+      - name: Verify OpenAI secret
+        run: test -n "$OPENAI_API_KEY"
+      - name: Run mycelium target diagnostic
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          from ai_lca.llm import extract_inventory_from_text
+          text=Path('benchmarks/mycelium_2024/source_excerpt.txt').read_text()
+          x=extract_inventory_from_text(text, model='gpt-5-mini')
+          out=Path('benchmark_runs/mycelium_2024'); out.mkdir(parents=True,exist_ok=True)
+          (out/'extraction.json').write_text(x.model_dump_json(indent=2))
+          norm=lambda s:' '.join(re.sub(r'[^a-z0-9]+',' ',s.casefold()).split())
+          proc_by_norm={norm(p.name):p for p in x.processes}
+          expected=['raw material shredding','primary substrate mixing','sterilization','inoculation','primary incubation','substrate shredding','filling of molds','secondary incubation','tertiary incubation','drying stabilization']
+          matched=[]; missing=[]
+          for e in expected:
+              en=norm(e)
+              hit=next((p for n,p in proc_by_norm.items() if en in n or n in en),None)
+              (matched if hit else missing).append(hit.name if hit else e)
+          print('Processes:', [p.name for p in x.processes])
+          print('Matched core unit processes:', matched)
+          print('Missing core unit processes:', missing)
+          # Check that a distinctive unit-process flow is attached to the correct retained process.
+          drying_ids={p.process_id for p in x.processes if 'drying' in norm(p.name) or 'stabilization' in norm(p.name)}
+          drying_flow=[f for f in x.flows if f.process_id in drying_ids and 'electricity' in norm(f.name) and f.amount is not None and abs(float(f.amount)-12.02)<1e-6]
+          mixing_ids={p.process_id for p in x.processes if 'primary substrate mixing' in norm(p.name)}
+          water_flow=[f for f in x.flows if f.process_id in mixing_ids and 'tap water' in norm(f.name) and f.amount is not None and abs(float(f.amount)-15.65)<1e-6]
+          result={'process_count':len(x.processes),'matched_core':len(matched),'missing_core':missing,'drying_flow_routed':bool(drying_flow),'mixing_water_routed':bool(water_flow)}
+          (out/'target_result.json').write_text(json.dumps(result,indent=2)+'\n')
+          print(json.dumps(result,indent=2))
+          if len(matched)<8 or not drying_flow or not water_flow:
+              raise SystemExit('Mycelium target diagnostic failed')
+          PY
+      - name: Run existing paper regressions (one run each)
+        shell: bash
+        run: |
+          set -e
+          mkdir -p benchmark_runs
+          bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/hermesmann_2022/expected.json --source benchmarks/hermesmann_2022/source_main_excerpt.txt benchmarks/hermesmann_2022/source_supplement_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir benchmark_runs/hermesmann_2022
+          gzip -dc benchmarks/gerloff_2021/source_supplement_workbook.txt.gz > benchmarks/gerloff_2021/source_supplement_workbook.txt
+          bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark_multimodal --expected benchmarks/gerloff_2021/expected.json --source benchmarks/gerloff_2021/source_main_excerpt.txt benchmarks/gerloff_2021/source_supplement_machine_readable.txt benchmarks/gerloff_2021/source_supplement_workbook.txt --runs 1 --model "$OPENAI_MODEL" --max-visual-assets 0 --output-dir benchmark_runs/gerloff_2021
+          bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/yang_2024/expected.json --source benchmarks/yang_2024/source_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir benchmark_runs/yang_2024
+          bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/gonzales_calienes_2025/expected.json --source benchmarks/gonzales_calienes_2025/source_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir benchmark_runs/gonzales_calienes_2025
+          bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/afzal_2023/expected.json --source benchmarks/afzal_2023/source_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir benchmark_runs/afzal_2023
+          bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/terlouw_2021/expected.json --source benchmarks/terlouw_2021/source_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir benchmark_runs/terlouw_2021
+      - name: Regression gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          papers=['hermesmann_2022','gerloff_2021','yang_2024','gonzales_calienes_2025','afzal_2023','terlouw_2021']
+          rows=[]; failures=[]
+          for paper in papers:
+              s=json.loads((Path('benchmark_runs')/paper/'summary.json').read_text())
+              row={k:float(s[k]) for k in ['mean_overall_score','mean_process_recall','mean_process_precision','mean_flow_recall','mean_flow_precision']}
+              row['paper']=paper; rows.append(row)
+              checks=[('overall',row['mean_overall_score'],.80),('process recall',row['mean_process_recall'],.90),('process precision',row['mean_process_precision'],.90),('flow recall',row['mean_flow_recall'],.80),('flow precision',row['mean_flow_precision'],.80)]
+              failures += [f'{paper}: {n} {v:.3f} < {t:.3f}' for n,v,t in checks if v<t]
+          Path('benchmark_runs/regression_summary.json').write_text(json.dumps(rows,indent=2)+'\n')
+          print(json.dumps(rows,indent=2))
+          if failures:
+              print('REGRESSION GATE FAILURES:')
+              print('\n'.join(failures))
+              raise SystemExit(1)
+          PY
+      - name: Commit candidate only after target + regression gates pass
+        shell: bash
+        run: |
+          git config user.name "ai-lca-benchmark-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/ai_lca/llm.py
+          if git diff --cached --quiet; then
+            echo "No prompt change to commit"
+          else
+            git commit -m "Retain explicitly inventoried unit processes"
+            git push origin HEAD:agent/mycelium-unit-process-regression
+          fi
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mycelium-unit-process-candidate-${{ github.run_id }}
+          path: benchmark_runs
+          if-no-files-found: warn
+          retention-days: 30
