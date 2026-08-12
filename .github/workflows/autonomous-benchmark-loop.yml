@@ -1,4 +1,4 @@
-name: Persist autonomous benchmark gate configuration
+name: Autonomous benchmark improvement loop
 
 on:
   push:
@@ -11,25 +11,31 @@ permissions:
 
 concurrency:
   group: autonomous-benchmark-improvement-loop
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   OPENAI_MODEL: gpt-5.6
   OPENAI_VISION_MODEL: gpt-5.6
   OPENAI_REASONING_EFFORT: medium
   OPENAI_REPAIR_MODEL: gpt-5.6
   OPENAI_REPAIR_REASONING_EFFORT: xhigh
+  AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+  AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
 
 jobs:
-  persist:
+  iterate:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out autonomous development branch
+        uses: actions/checkout@v4
         with:
           ref: agent/autonomous-benchmark-loop
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
@@ -37,141 +43,20 @@ jobs:
       - name: Install package
         run: python -m pip install -e ".[test]"
 
-      - name: Persist gate and reader configuration
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
+      - name: Verify OpenAI secret
+        run: test -n "$OPENAI_API_KEY"
 
-          loop_path = Path("src/ai_lca/autonomous_benchmark_loop.py")
-          loop = loop_path.read_text(encoding="utf-8")
-
-          gate = '''def _threshold_failures(
-              summaries: dict[str, dict[str, Any]],
-              baseline: dict[str, dict[str, Any]],
-          ) -> list[str]:
-              """Protect accepted metrics while permitting incremental progress to final floors."""
-              failures: list[str] = []
-              for name, summary in summaries.items():
-                  base = baseline[name]
-                  for metric, threshold in ABSOLUTE_THRESHOLDS.items():
-                      value = float(summary[metric])
-                      base_value = float(base[metric])
-                      if base_value >= threshold and value < threshold:
-                          failures.append(
-                              f"{name}: lost achieved absolute floor for {metric}: "
-                              f"{value:.4f} < {threshold:.4f}"
-                          )
-                      if value + NO_REGRESSION_TOLERANCE < base_value:
-                          failures.append(
-                              f"{name}: regression {metric} {value:.4f} < accepted {base_value:.4f}"
-                          )
-              return failures
-          '''
-          loop, n = re.subn(
-              r'def _threshold_failures\([\s\S]*?(?=\ndef _target_improved)',
-              gate.rstrip() + "\n",
-              loop,
-              count=1,
-          )
-          if n != 1:
-              raise RuntimeError(f"Could not replace acceptance gate: {n}")
-
-          final_gate = '''def _all_absolute_pass(summaries: dict[str, dict[str, Any]]) -> bool:
-              """Absolute thresholds are the final success condition for the development target."""
-              summary = summaries[TARGET_BENCHMARK]
-              return not any(
-                  float(summary[metric]) < threshold
-                  for metric, threshold in ABSOLUTE_THRESHOLDS.items()
-              )
-          '''
-          loop, n = re.subn(
-              r'def _all_absolute_pass\([\s\S]*?(?=\ndef _commit_and_push)',
-              final_gate.rstrip() + "\n",
-              loop,
-              count=1,
-          )
-          if n != 1:
-              raise RuntimeError(f"Could not replace final gate: {n}")
-
-          old_phrase = (
-              '"Make one small general extractor repair. The target must improve, all six blocking "\n'
-              '            "benchmarks must satisfy the fixed absolute floors, and no protected metric may regress."'
-          )
-          new_phrase = (
-              '"Make one small general extractor repair. The target must improve without regressing any "\n'
-              '            "accepted target metric. Regression benchmarks must not fall below accepted baselines; "\n'
-              '            "absolute floors are only the target final success condition."'
-          )
-          if old_phrase in loop:
-              loop = loop.replace(old_phrase, new_phrase, 1)
-          elif "absolute floors are only the target final success condition" not in loop:
-              raise RuntimeError("Could not replace repair instruction")
-          loop_path.write_text(loop, encoding="utf-8")
-
-          llm_path = Path("src/ai_lca/llm.py")
-          llm = llm_path.read_text(encoding="utf-8")
-          effort_line = 'reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),'
-          if effort_line not in llm:
-              llm, count = re.subn(
-                  r'(?m)^(\s*)model=chosen_model,\n',
-                  lambda m: f'{m.group(1)}model=chosen_model,\n{m.group(1)}{effort_line}\n',
-                  llm,
-              )
-              if count != 4:
-                  raise RuntimeError(f"Expected four chosen_model call sites, found {count}")
-              pattern = (
-                  r'(structure = identify_foreground_structure\(\n'
-                  r'\s*text,\n'
-                  r'\s*model=chosen_model,\n)'
-                  r'\s*reasoning_effort=os\.getenv\("OPENAI_REASONING_EFFORT", "medium"\),\n'
-              )
-              llm, removed = re.subn(pattern, r'\1', llm, count=1)
-              if removed != 1:
-                  raise RuntimeError("Could not isolate internal structure call")
-              llm_path.write_text(llm, encoding="utf-8")
-          if llm_path.read_text(encoding="utf-8").count(effort_line) != 3:
-              raise RuntimeError("Medium reasoning must appear on exactly three OpenAI reader calls")
-
-          lines = [
-              "from ai_lca import autonomous_benchmark_loop as loop",
-              "",
-              "def _summary(overall, pr, pp, fr, fp):",
-              "    return {'mean_overall_score': overall, 'mean_process_recall': pr, 'mean_process_precision': pp, 'mean_flow_recall': fr, 'mean_flow_precision': fp}",
-              "",
-              "def test_incremental_target_improvement_is_not_forced_to_final_floors():",
-              "    base = _summary(0.4991736513, 0.0952380952, 1.0, 0.0701754386, 0.0655737705)",
-              "    candidate = _summary(0.5334611118, 0.0952380952, 1.0, 0.0877192982, 0.0819672131)",
-              "    assert loop._threshold_failures({'mycelium_2024': candidate}, {'mycelium_2024': base}) == []",
-              "    assert loop._target_improved(candidate, base)",
-              "",
-              "def test_target_metric_regression_is_rejected_even_when_other_metrics_improve():",
-              "    base = _summary(0.4991736513, 0.0952380952, 1.0, 0.0701754386, 0.0655737705)",
-              "    candidate = _summary(0.995, 1.0, 0.955, 1.0, 1.0)",
-              "    failures = loop._threshold_failures({'mycelium_2024': candidate}, {'mycelium_2024': base})",
-              "    assert any('mean_process_precision' in failure and 'regression' in failure for failure in failures)",
-              "",
-              "def test_weak_regression_benchmark_is_protected_at_accepted_baseline_not_global_floor():",
-              "    base = _summary(0.8037537810, 1.0, 1.0, 0.6551724138, 0.6333333333)",
-              "    assert loop._threshold_failures({'terlouw_2021': dict(base)}, {'terlouw_2021': base}) == []",
-              "    candidate = dict(base)",
-              "    candidate['mean_flow_recall'] -= 0.001",
-              "    assert loop._threshold_failures({'terlouw_2021': candidate}, {'terlouw_2021': base})",
-              "",
-              "def test_final_absolute_gate_applies_to_target_only():",
-              "    passing = _summary(0.80, 0.90, 0.90, 0.80, 0.80)",
-              "    assert loop._all_absolute_pass({'mycelium_2024': passing})",
-          ]
-          Path("tests/test_autonomous_benchmark_gates.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
-          PY
-
-      - name: Run full tests
+      - name: Run repository tests
         run: python -m pytest -q
 
-      - name: Commit permanent source configuration
-        run: |
-          git config user.name ai-lca-autonomous-benchmark
-          git config user.email actions@users.noreply.github.com
-          git add src/ai_lca/autonomous_benchmark_loop.py src/ai_lca/llm.py tests/test_autonomous_benchmark_gates.py
-          git commit -m "Persist incremental no-regression gates and GPT-5.6 reader"
-          git push origin HEAD:agent/autonomous-benchmark-loop
+      - name: Run bounded autonomous patch-read-benchmark loop
+        run: python -m ai_lca.autonomous_benchmark_loop --max-iterations 7
+
+      - name: Upload loop evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autonomous-benchmark-loop-${{ github.run_id }}
+          path: artifacts/autonomous_benchmark_loop
+          if-no-files-found: warn
+          retention-days: 30
