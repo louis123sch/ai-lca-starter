@@ -1,0 +1,16 @@
+{
+  "single_doi": "10.1007/s11367-025-02491-2",
+  "targets": [
+    "10.1007/s11367-024-02374-y",
+    "10.1007/s11367-024-02378-8",
+    "10.1007/s11367-024-02396-6",
+    "10.1007/s11367-025-02491-2",
+    "10.1007/s11367-025-02503-1"
+  ],
+  "controls": [
+    "10.1007/s11367-024-02412-9",
+    "10.1007/s11367-025-02453-8",
+    "10.1007/s11367-025-02454-7"
+  ],
+  "policy": "Targets are social-LCA-only studies that the frozen baseline incorrectly passed as reconstructable physical foreground LCI. Controls must remain eligible, including the mixed environmental/social argan-oil study."
+}
