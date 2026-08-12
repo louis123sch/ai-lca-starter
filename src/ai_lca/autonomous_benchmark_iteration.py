@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,12 +14,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from .llm import _client
 
 
-class PatchProposal(BaseModel):
+class TextReplacement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    old_text: str
+    new_text: str
+
+
+class RepairProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: str
     rationale: str
-    files_touched: list[str] = Field(default_factory=list)
-    unified_diff: str
+    edits: list[TextReplacement] = Field(min_length=1, max_length=6)
 
 
 ALLOWED_FILES = [
@@ -65,9 +72,15 @@ Hard constraints:
 - Terminal foreground processes may be real even when they do not feed a downstream foreground process, but only if the source explicitly models them quantitatively as foreground activities.
 - A literature-derived or custom subsystem may be foreground when the study explicitly models it as part of the foreground LCI; do not treat all literature-derived or custom subsystems as foreground automatically.
 - Include deterministic tests for behavior changes when practical.
-- Return a standard git unified diff only in unified_diff. Do not use Markdown fences or custom patch syntax.
 
-The patch will be rejected if any protected benchmark falls below its absolute quality floor or below the accepted baseline. Do not trade one benchmark for another.
+EDIT FORMAT:
+- Do NOT return a git diff or patch.
+- Return exact text replacements only.
+- Each edit must name one allowed file and provide an old_text block copied VERBATIM from CURRENT CODE plus the desired new_text replacement.
+- old_text must be specific enough to occur exactly once in that file.
+- Keep edits small. Prefer one or two focused replacements over rewriting whole files.
+
+The repair will be rejected if any protected benchmark falls below its absolute quality floor or below the accepted baseline. Do not trade one benchmark for another.
 """
 
 
@@ -75,79 +88,32 @@ def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
     return subprocess.run(cmd, text=True, capture_output=True, check=check)
 
 
-def _strip_markdown_fence(diff: str) -> str:
-    text = diff.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].strip().lower() in {"```", "```diff", "```patch"}:
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-    return text
+def _changed_paths(proposal: RepairProposal) -> set[str]:
+    return {edit.path for edit in proposal.edits}
 
 
-def _normalise_header_path(raw: str, prefix: str) -> str:
-    value = raw.strip().split("\t", 1)[0].strip()
-    if value == "/dev/null":
-        return value
-    if value.startswith('"') and value.endswith('"'):
-        value = value[1:-1]
-    if value.startswith(("a/", "b/")):
-        value = value[2:]
-    return f"{prefix}/{value}"
-
-
-def _normalise_unified_diff(diff: str) -> str:
-    text = _strip_markdown_fence(diff)
-    lines = text.splitlines()
-    first = next(
-        (i for i, line in enumerate(lines) if line.startswith("diff --git ") or line.startswith("--- ")),
-        None,
-    )
-    if first is not None:
-        lines = lines[first:]
-    normalised: list[str] = []
-    for line in lines:
-        if line.startswith("--- "):
-            normalised.append("--- " + _normalise_header_path(line[4:], "a"))
-        elif line.startswith("+++ "):
-            normalised.append("+++ " + _normalise_header_path(line[4:], "b"))
-        else:
-            normalised.append(line)
-    return "\n".join(normalised).rstrip() + "\n"
-
-
-def _changed_paths(diff: str) -> set[str]:
-    paths: set[str] = set()
-    for line in _normalise_unified_diff(diff).splitlines():
-        if line.startswith("+++ "):
-            value = line[4:].strip().split("\t", 1)[0].strip().strip('"')
-            if value == "/dev/null":
-                continue
-            if value.startswith("b/"):
-                value = value[2:]
-            paths.add(value)
-    return paths
-
-
-def _validate_patch(proposal: PatchProposal) -> None:
+def _validate_proposal(proposal: RepairProposal) -> None:
     allowed = set(ALLOWED_FILES)
-    paths = _changed_paths(proposal.unified_diff)
+    paths = _changed_paths(proposal)
     if not paths:
-        raise ValueError("proposal contains no changed file paths")
+        raise ValueError("proposal contains no edits")
     if paths - allowed:
         raise ValueError(f"proposal touched disallowed paths: {sorted(paths - allowed)}")
-    metadata_paths = {
-        p[2:] if p.startswith(("a/", "b/")) else p for p in proposal.files_touched
-    }
-    if metadata_paths - allowed:
-        raise ValueError(f"proposal metadata touched disallowed paths: {sorted(metadata_paths - allowed)}")
     if any(path.startswith(FORBIDDEN_PREFIXES) for path in paths):
         raise ValueError("proposal attempted to modify protected infrastructure/data")
+
+    proposed_text = "\n".join(edit.new_text for edit in proposal.edits)
     for pattern in FORBIDDEN_PATCH_PATTERNS:
-        if re.search(pattern, proposal.unified_diff, re.IGNORECASE | re.DOTALL):
+        if re.search(pattern, proposed_text, re.IGNORECASE | re.DOTALL):
             raise ValueError(f"proposal violates anti-overfitting policy: {pattern}")
+
+    for edit in proposal.edits:
+        if not edit.old_text:
+            raise ValueError(f"edit for {edit.path} has empty old_text")
+        if edit.old_text == edit.new_text:
+            raise ValueError(f"edit for {edit.path} makes no change")
+        if len(edit.old_text) > 20000 or len(edit.new_text) > 30000:
+            raise ValueError(f"edit for {edit.path} is too large for a bounded repair")
 
 
 def _context(max_chars: int) -> str:
@@ -158,10 +124,70 @@ def _context(max_chars: int) -> str:
         if not path.exists() or remaining <= 0:
             continue
         text = path.read_text(encoding="utf-8")
-        text = text[:remaining]
+        if len(text) > remaining:
+            text = text[:remaining]
         chunks.append(f"\n===== FILE: {name} =====\n{text}")
         remaining -= len(text)
     return "".join(chunks)
+
+
+def _apply_exact_edits(proposal: RepairProposal) -> None:
+    staged: dict[str, str] = {}
+    for edit in proposal.edits:
+        text = staged.get(edit.path)
+        if text is None:
+            text = Path(edit.path).read_text(encoding="utf-8")
+        count = text.count(edit.old_text)
+        if count != 1:
+            raise RuntimeError(
+                f"exact replacement failed for {edit.path}: old_text occurs {count} times; "
+                "copy a unique old_text block verbatim from CURRENT CODE"
+            )
+        staged[edit.path] = text.replace(edit.old_text, edit.new_text, 1)
+
+    for path, text in staged.items():
+        Path(path).write_text(text, encoding="utf-8")
+
+
+def _call_repair_model(
+    *,
+    model: str,
+    reasoning_effort: str,
+    prompt: str,
+    api_attempts: int = 3,
+) -> RepairProposal | None:
+    last_error: Exception | None = None
+    transient_names = {
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "InternalServerError",
+    }
+    for api_attempt in range(1, api_attempts + 1):
+        try:
+            completion = _client().beta.chat.completions.parse(
+                model=model,
+                reasoning_effort=reasoning_effort,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format=RepairProposal,
+            )
+            return completion.choices[0].message.parsed
+        except Exception as exc:
+            last_error = exc
+            if exc.__class__.__name__ not in transient_names or api_attempt >= api_attempts:
+                raise
+            delay = 15 * (2 ** (api_attempt - 1))
+            print(
+                f"Transient repair-model failure on API attempt {api_attempt}/{api_attempts}: "
+                f"{exc.__class__.__name__}: {exc}. Retrying in {delay}s."
+            )
+            time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+    return None
 
 
 def propose_and_apply(
@@ -183,7 +209,8 @@ def propose_and_apply(
             retry_context = (
                 "\nPREVIOUS PROPOSAL REJECTION:\n"
                 + errors[-1]
-                + "\nReturn a different, valid, smaller general repair.\n"
+                + "\nKeep the same general objective, but return a valid smaller exact-text edit. "
+                "Copy old_text verbatim from CURRENT CODE.\n"
             )
         prompt = (
             "DIAGNOSTICS FROM THE CURRENT ACCEPTED VERSION AND MOST RECENT REJECTIONS:\n"
@@ -194,16 +221,21 @@ def propose_and_apply(
             + "\nCURRENT CODE:\n"
             + _context(max_context_chars)
         )
-        completion = _client().beta.chat.completions.parse(
-            model=model,
-            reasoning_effort=reasoning_effort,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            response_format=PatchProposal,
-        )
-        proposal = completion.choices[0].message.parsed
+
+        try:
+            proposal = _call_repair_model(
+                model=model,
+                reasoning_effort=reasoning_effort,
+                prompt=prompt,
+                api_attempts=3,
+            )
+        except Exception as exc:
+            errors.append(f"repair model call failed: {exc.__class__.__name__}: {exc}")
+            attempt_dir = output_dir / f"attempt_{attempt:02d}"
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+            (attempt_dir / "rejection.txt").write_text(errors[-1] + "\n", encoding="utf-8")
+            continue
+
         if proposal is None:
             errors.append("repair model returned no structured proposal")
             continue
@@ -213,19 +245,10 @@ def propose_and_apply(
         (attempt_dir / "proposal.json").write_text(
             proposal.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
-        raw = proposal.unified_diff.rstrip() + "\n"
-        (attempt_dir / "proposal.raw.patch").write_text(raw, encoding="utf-8")
 
         try:
-            diff = _normalise_unified_diff(raw)
-            normalised = proposal.model_copy(update={"unified_diff": diff})
-            _validate_patch(normalised)
-            patch_path = attempt_dir / "proposal.patch"
-            patch_path.write_text(diff, encoding="utf-8")
-            checked = _run(["git", "apply", "--check", str(patch_path)], check=False)
-            if checked.returncode:
-                raise RuntimeError("git apply --check failed: " + checked.stderr[-2500:])
-            _run(["git", "apply", str(patch_path)])
+            _validate_proposal(proposal)
+            _apply_exact_edits(proposal)
 
             tests = _run(["python", "-m", "pytest", "-q"], check=False)
             (attempt_dir / "deterministic_tests.log").write_text(
@@ -233,14 +256,16 @@ def propose_and_apply(
             )
             if tests.returncode:
                 _run(["git", "restore", "--", "src/ai_lca", "tests"], check=False)
-                raise RuntimeError("deterministic tests failed; candidate patch reverted")
+                raise RuntimeError("deterministic tests failed; candidate edits reverted")
 
+            diff = _run(["git", "diff", "--", "src/ai_lca", "tests"], check=False).stdout
+            (attempt_dir / "applied.diff").write_text(diff, encoding="utf-8")
             result = {
                 "applied": True,
                 "attempt": attempt,
                 "summary": proposal.summary,
                 "rationale": proposal.rationale,
-                "changed_paths": sorted(_changed_paths(diff)),
+                "changed_paths": sorted(_changed_paths(proposal)),
                 "diff_stat": _run(["git", "diff", "--stat"], check=False).stdout,
                 "deterministic_tests_passed": True,
             }
