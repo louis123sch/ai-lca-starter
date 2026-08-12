@@ -46,25 +46,7 @@ jobs:
           loop_path = Path("src/ai_lca/autonomous_benchmark_loop.py")
           loop = loop_path.read_text(encoding="utf-8")
 
-          old_gate = '''def _threshold_failures(
-              summaries: dict[str, dict[str, Any]],
-              baseline: dict[str, dict[str, Any]],
-          ) -> list[str]:
-              failures: list[str] = []
-              for name, summary in summaries.items():
-                  base = baseline[name]
-                  for metric, threshold in ABSOLUTE_THRESHOLDS.items():
-                      value = float(summary[metric])
-                      if value < threshold:
-                          failures.append(f"{name}: absolute {metric} {value:.4f} < {threshold:.4f}")
-                      base_value = float(base[metric])
-                      if value + NO_REGRESSION_TOLERANCE < base_value:
-                          failures.append(
-                              f"{name}: regression {metric} {value:.4f} < accepted {base_value:.4f}"
-                          )
-              return failures
-          '''
-          new_gate = '''def _threshold_failures(
+          gate = '''def _threshold_failures(
               summaries: dict[str, dict[str, Any]],
               baseline: dict[str, dict[str, Any]],
           ) -> list[str]:
@@ -86,19 +68,16 @@ jobs:
                           )
               return failures
           '''
-          if old_gate in loop:
-              loop = loop.replace(old_gate, new_gate, 1)
-          elif new_gate not in loop:
-              raise RuntimeError("Could not locate acceptance gate")
+          loop, n = re.subn(
+              r'def _threshold_failures\([\s\S]*?(?=\ndef _target_improved)',
+              gate.rstrip() + "\n",
+              loop,
+              count=1,
+          )
+          if n != 1:
+              raise RuntimeError(f"Could not replace acceptance gate: {n}")
 
-          old_stop = '''def _all_absolute_pass(summaries: dict[str, dict[str, Any]]) -> bool:
-              return not any(
-                  float(summary[metric]) < threshold
-                  for summary in summaries.values()
-                  for metric, threshold in ABSOLUTE_THRESHOLDS.items()
-              )
-          '''
-          new_stop = '''def _all_absolute_pass(summaries: dict[str, dict[str, Any]]) -> bool:
+          final_gate = '''def _all_absolute_pass(summaries: dict[str, dict[str, Any]]) -> bool:
               """Absolute thresholds are the final success condition for the development target."""
               summary = summaries[TARGET_BENCHMARK]
               return not any(
@@ -106,27 +85,28 @@ jobs:
                   for metric, threshold in ABSOLUTE_THRESHOLDS.items()
               )
           '''
-          if old_stop in loop:
-              loop = loop.replace(old_stop, new_stop, 1)
-          elif new_stop not in loop:
-              raise RuntimeError("Could not locate final success gate")
+          loop, n = re.subn(
+              r'def _all_absolute_pass\([\s\S]*?(?=\ndef _commit_and_push)',
+              final_gate.rstrip() + "\n",
+              loop,
+              count=1,
+          )
+          if n != 1:
+              raise RuntimeError(f"Could not replace final gate: {n}")
 
-          old_instruction = '''        "instruction": (
-              "Make one small general extractor repair. The target must improve, all six blocking "
-              "benchmarks must satisfy the fixed absolute floors, and no protected metric may regress."
-          ),
-          '''
-          new_instruction = '''        "instruction": (
-              "Make one small general extractor repair. The target must improve without regressing "
-              "any accepted target metric. Every blocking regression benchmark must remain at least "
-              "as good as its accepted baseline on every protected metric. Absolute floors are the "
-              "target's final success condition; they are not required for intermediate candidates."
-          ),
-          '''
-          if old_instruction in loop:
-              loop = loop.replace(old_instruction, new_instruction, 1)
-          elif new_instruction not in loop:
-              raise RuntimeError("Could not locate repair instruction")
+          old_phrase = (
+              '"Make one small general extractor repair. The target must improve, all six blocking "\n'
+              '            "benchmarks must satisfy the fixed absolute floors, and no protected metric may regress."'
+          )
+          new_phrase = (
+              '"Make one small general extractor repair. The target must improve without regressing any "\n'
+              '            "accepted target metric. Regression benchmarks must not fall below accepted baselines; "\n'
+              '            "absolute floors are only the target final success condition."'
+          )
+          if old_phrase in loop:
+              loop = loop.replace(old_phrase, new_phrase, 1)
+          elif "absolute floors are only the target final success condition" not in loop:
+              raise RuntimeError("Could not replace repair instruction")
           loop_path.write_text(loop, encoding="utf-8")
 
           llm_path = Path("src/ai_lca/llm.py")
@@ -156,16 +136,8 @@ jobs:
           lines = [
               "from ai_lca import autonomous_benchmark_loop as loop",
               "",
-              "",
               "def _summary(overall, pr, pp, fr, fp):",
-              "    return {",
-              "        'mean_overall_score': overall,",
-              "        'mean_process_recall': pr,",
-              "        'mean_process_precision': pp,",
-              "        'mean_flow_recall': fr,",
-              "        'mean_flow_precision': fp,",
-              "    }",
-              "",
+              "    return {'mean_overall_score': overall, 'mean_process_recall': pr, 'mean_process_precision': pp, 'mean_flow_recall': fr, 'mean_flow_precision': fp}",
               "",
               "def test_incremental_target_improvement_is_not_forced_to_final_floors():",
               "    base = _summary(0.4991736513, 0.0952380952, 1.0, 0.0701754386, 0.0655737705)",
@@ -173,13 +145,11 @@ jobs:
               "    assert loop._threshold_failures({'mycelium_2024': candidate}, {'mycelium_2024': base}) == []",
               "    assert loop._target_improved(candidate, base)",
               "",
-              "",
               "def test_target_metric_regression_is_rejected_even_when_other_metrics_improve():",
               "    base = _summary(0.4991736513, 0.0952380952, 1.0, 0.0701754386, 0.0655737705)",
               "    candidate = _summary(0.995, 1.0, 0.955, 1.0, 1.0)",
               "    failures = loop._threshold_failures({'mycelium_2024': candidate}, {'mycelium_2024': base})",
               "    assert any('mean_process_precision' in failure and 'regression' in failure for failure in failures)",
-              "",
               "",
               "def test_weak_regression_benchmark_is_protected_at_accepted_baseline_not_global_floor():",
               "    base = _summary(0.8037537810, 1.0, 1.0, 0.6551724138, 0.6333333333)",
@@ -187,7 +157,6 @@ jobs:
               "    candidate = dict(base)",
               "    candidate['mean_flow_recall'] -= 0.001",
               "    assert loop._threshold_failures({'terlouw_2021': candidate}, {'terlouw_2021': base})",
-              "",
               "",
               "def test_final_absolute_gate_applies_to_target_only():",
               "    passing = _summary(0.80, 0.90, 0.90, 0.80, 0.80)",
