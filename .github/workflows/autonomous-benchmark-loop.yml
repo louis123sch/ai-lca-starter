@@ -14,7 +14,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   OPENAI_MODEL: gpt-5.6
   OPENAI_VISION_MODEL: gpt-5.6
   OPENAI_REASONING_EFFORT: medium
@@ -154,82 +153,56 @@ jobs:
           if llm_path.read_text(encoding="utf-8").count(effort_line) != 3:
               raise RuntimeError("Medium reasoning must appear on exactly three OpenAI reader calls")
 
-          test_path = Path("tests/test_autonomous_benchmark_gates.py")
-          test_path.write_text('''from ai_lca import autonomous_benchmark_loop as loop\n\n\ndef _summary(overall, pr, pp, fr, fp):\n    return {\n        "mean_overall_score": overall,\n        "mean_process_recall": pr,\n        "mean_process_precision": pp,\n        "mean_flow_recall": fr,\n        "mean_flow_precision": fp,\n    }\n\n\ndef test_incremental_target_improvement_is_not_forced_to_final_floors():\n    base = _summary(0.4991736513, 0.0952380952, 1.0, 0.0701754386, 0.0655737705)\n    candidate = _summary(0.5334611118, 0.0952380952, 1.0, 0.0877192982, 0.0819672131)\n    assert loop._threshold_failures({"mycelium_2024": candidate}, {"mycelium_2024": base}) == []\n    assert loop._target_improved(candidate, base)\n\n\ndef test_target_metric_regression_is_rejected_even_when_other_metrics_improve():\n    base = _summary(0.4991736513, 0.0952380952, 1.0, 0.0701754386, 0.0655737705)\n    candidate = _summary(0.995, 1.0, 0.955, 1.0, 1.0)\n    failures = loop._threshold_failures({"mycelium_2024": candidate}, {"mycelium_2024": base})\n    assert any("mean_process_precision" in failure and "regression" in failure for failure in failures)\n\n\ndef test_weak_regression_benchmark_is_protected_at_accepted_baseline_not_global_floor():\n    base = _summary(0.8037537810, 1.0, 1.0, 0.6551724138, 0.6333333333)\n    assert loop._threshold_failures({"terlouw_2021": dict(base)}, {"terlouw_2021": base}) == []\n    candidate = dict(base)\n    candidate["mean_flow_recall"] -= 0.001\n    assert loop._threshold_failures({"terlouw_2021": candidate}, {"terlouw_2021": base})\n\n\ndef test_final_absolute_gate_applies_to_target_only():\n    passing = _summary(0.80, 0.90, 0.90, 0.80, 0.80)\n    assert loop._all_absolute_pass({"mycelium_2024": passing})\n''', encoding="utf-8")
-
-          stable_workflow = '''name: Autonomous benchmark improvement loop
-
-on:
-  push:
-    branches:
-      - agent/autonomous-benchmark-loop
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-concurrency:
-  group: autonomous-benchmark-improvement-loop
-  cancel-in-progress: true
-
-env:
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-  OPENAI_MODEL: gpt-5.6
-  OPENAI_VISION_MODEL: gpt-5.6
-  OPENAI_REASONING_EFFORT: medium
-  OPENAI_REPAIR_MODEL: gpt-5.6
-  OPENAI_REPAIR_REASONING_EFFORT: xhigh
-  AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
-  AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
-
-jobs:
-  iterate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    steps:
-      - name: Check out autonomous development branch
-        uses: actions/checkout@v4
-        with:
-          ref: agent/autonomous-benchmark-loop
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install package
-        run: python -m pip install -e ".[test]"
-
-      - name: Verify OpenAI secret
-        run: test -n "$OPENAI_API_KEY"
-
-      - name: Run repository tests
-        run: python -m pytest -q
-
-      - name: Run bounded autonomous patch-read-benchmark loop
-        run: python -m ai_lca.autonomous_benchmark_loop --max-iterations 7
-
-      - name: Upload loop evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: autonomous-benchmark-loop-${{ github.run_id }}
-          path: artifacts/autonomous_benchmark_loop
-          if-no-files-found: warn
-          retention-days: 30
-'''
-          Path(".github/workflows/autonomous-benchmark-loop.yml").write_text(stable_workflow, encoding="utf-8")
+          lines = [
+              "from ai_lca import autonomous_benchmark_loop as loop",
+              "",
+              "",
+              "def _summary(overall, pr, pp, fr, fp):",
+              "    return {",
+              "        'mean_overall_score': overall,",
+              "        'mean_process_recall': pr,",
+              "        'mean_process_precision': pp,",
+              "        'mean_flow_recall': fr,",
+              "        'mean_flow_precision': fp,",
+              "    }",
+              "",
+              "",
+              "def test_incremental_target_improvement_is_not_forced_to_final_floors():",
+              "    base = _summary(0.4991736513, 0.0952380952, 1.0, 0.0701754386, 0.0655737705)",
+              "    candidate = _summary(0.5334611118, 0.0952380952, 1.0, 0.0877192982, 0.0819672131)",
+              "    assert loop._threshold_failures({'mycelium_2024': candidate}, {'mycelium_2024': base}) == []",
+              "    assert loop._target_improved(candidate, base)",
+              "",
+              "",
+              "def test_target_metric_regression_is_rejected_even_when_other_metrics_improve():",
+              "    base = _summary(0.4991736513, 0.0952380952, 1.0, 0.0701754386, 0.0655737705)",
+              "    candidate = _summary(0.995, 1.0, 0.955, 1.0, 1.0)",
+              "    failures = loop._threshold_failures({'mycelium_2024': candidate}, {'mycelium_2024': base})",
+              "    assert any('mean_process_precision' in failure and 'regression' in failure for failure in failures)",
+              "",
+              "",
+              "def test_weak_regression_benchmark_is_protected_at_accepted_baseline_not_global_floor():",
+              "    base = _summary(0.8037537810, 1.0, 1.0, 0.6551724138, 0.6333333333)",
+              "    assert loop._threshold_failures({'terlouw_2021': dict(base)}, {'terlouw_2021': base}) == []",
+              "    candidate = dict(base)",
+              "    candidate['mean_flow_recall'] -= 0.001",
+              "    assert loop._threshold_failures({'terlouw_2021': candidate}, {'terlouw_2021': base})",
+              "",
+              "",
+              "def test_final_absolute_gate_applies_to_target_only():",
+              "    passing = _summary(0.80, 0.90, 0.90, 0.80, 0.80)",
+              "    assert loop._all_absolute_pass({'mycelium_2024': passing})",
+          ]
+          Path("tests/test_autonomous_benchmark_gates.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
       - name: Run full tests
         run: python -m pytest -q
 
-      - name: Commit permanent configuration
+      - name: Commit permanent source configuration
         run: |
           git config user.name ai-lca-autonomous-benchmark
           git config user.email actions@users.noreply.github.com
-          git add src/ai_lca/autonomous_benchmark_loop.py src/ai_lca/llm.py tests/test_autonomous_benchmark_gates.py .github/workflows/autonomous-benchmark-loop.yml
+          git add src/ai_lca/autonomous_benchmark_loop.py src/ai_lca/llm.py tests/test_autonomous_benchmark_gates.py
           git commit -m "Persist incremental no-regression gates and GPT-5.6 reader"
           git push origin HEAD:agent/autonomous-benchmark-loop
