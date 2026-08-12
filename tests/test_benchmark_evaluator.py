@@ -76,7 +76,7 @@ def test_forbidden_term_still_flags_unmatched_extra_process():
     assert report.forbidden_processes == ["Hydrogen compressor"]
 
 
-def test_child_process_is_forbidden_even_when_name_matches_expected_alias():
+def test_expected_child_process_is_not_forbidden_merely_for_having_parent():
     report = evaluate_extraction(
         _extraction(
             [
@@ -95,7 +95,29 @@ def test_child_process_is_forbidden_even_when_name_matches_expected_alias():
     )
 
     assert report.matched_processes == 1
-    assert "PEMEC (unexpected child process)" in report.forbidden_processes
+    assert "PEMEC (unexpected child process)" not in report.forbidden_processes
+
+
+def test_unmatched_child_process_is_still_forbidden():
+    report = evaluate_extraction(
+        _extraction(
+            [
+                ForegroundProcess(
+                    process_id="pemec",
+                    name="PEMEC",
+                ),
+                ForegroundProcess(
+                    process_id="compressor",
+                    name="Hydrogen compressor",
+                    parent_process_id="pemec",
+                ),
+            ]
+        ),
+        _expected(),
+    )
+
+    assert report.matched_processes == 1
+    assert "Hydrogen compressor (unexpected child process)" in report.forbidden_processes
 
 
 def test_generic_modelling_qualifiers_do_not_create_false_negative():
