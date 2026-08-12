@@ -87,9 +87,6 @@
       "direction_accuracy": 0.25,
       "flow_precision": 0.06557377049180328,
       "flow_recall": 0.07017543859649122,
-      "overall_score": 0.4991736513414684,
-      "process_precision": 1.0,
-      "process_recall": 0.09523809523809523,
       "missing_processes": [
         "Raw material shredding",
         "Primary substrate mixing",
@@ -111,6 +108,9 @@
         "Waste treatment",
         "Disposal"
       ],
+      "overall_score": 0.4991736513414684,
+      "process_precision": 1.0,
+      "process_recall": 0.09523809523809523,
       "unexpected_processes": [],
       "unit_accuracy": 1.0
     },
@@ -125,7 +125,7 @@
       "unit_accuracy": 0.5263157894736842
     }
   },
-  "iteration": 5,
+  "iteration": 6,
   "last_result": "target_gate_rejected",
   "max_iterations": 6,
   "no_regression_tolerance": 0.0,
