@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from ai_lca.autonomous_literature import (
+    ASSIGN_SYSTEM_PROMPT,
     Budget,
     CandidateAssignment,
     CandidateAssignmentBatch,
@@ -49,6 +50,15 @@ def test_assignment_validation_marks_missing_candidates():
     accepted, missing = _validate_assignments(candidates, batch, {"P1"})
     assert len(accepted) == 1
     assert missing == ["b"]
+
+
+def test_assignment_prompt_excludes_lcia_results_without_blocking_direct_emissions():
+    prompt = ASSIGN_SYSTEM_PROMPT.casefold()
+    assert "lcia midpoint or endpoint result rows" in prompt
+    assert "must be not_inventory" in prompt
+    assert "direct elementary co2 emission" in prompt
+    assert "copy only supplied candidate_ids exactly" in prompt
+    assert "never invent wildcard or placeholder ids" in prompt
 
 
 def test_process_gate_detects_omitted_candidate():
