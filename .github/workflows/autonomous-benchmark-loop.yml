@@ -68,10 +68,10 @@ jobs:
                   ),
                   llm,
               )
-              if count != 3:
-                  raise RuntimeError(f"Expected 3 reader model calls, patched {count}")
+              if count != 4:
+                  raise RuntimeError(f"Expected 4 reader model calls, patched {count}")
               llm_path.write_text(llm, encoding="utf-8")
-          elif llm.count(effort_line) != 3:
+          elif llm.count(effort_line) != 4:
               raise RuntimeError("Reader reasoning-effort configuration is inconsistent")
 
           # Acceptance logic: absolute thresholds are final success floors, not
