@@ -269,8 +269,8 @@
       "unit_accuracy": 1.0
     }
   },
-  "iteration": 0,
-  "last_result": "baseline_initialized",
+  "iteration": 1,
+  "last_result": "no_valid_patch",
   "max_iterations": 8,
   "no_regression_tolerance": 0.0,
   "source_run_id": "31602098629",
