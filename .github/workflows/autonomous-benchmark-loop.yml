@@ -51,27 +51,36 @@ jobs:
           python - <<'PY'
           import importlib
           import json
-          import re
           from pathlib import Path
 
-          # Reader/extractor: explicitly pass medium reasoning effort to every
-          # GPT call using the selected extraction/vision model.
+          # Reader/extractor: add medium reasoning only to the three actual
+          # OpenAI Structured Output calls, never to internal Python calls.
           llm_path = Path("src/ai_lca/llm.py")
           llm = llm_path.read_text(encoding="utf-8")
           effort_line = 'reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),'
           if effort_line not in llm:
-              llm, count = re.subn(
-                  r'(?m)^(\s*)model=chosen_model,\n',
-                  lambda m: (
-                      f'{m.group(1)}model=chosen_model,\n'
-                      f'{m.group(1)}{effort_line}\n'
-                  ),
-                  llm,
-              )
-              if count != 4:
-                  raise RuntimeError(f"Expected 4 reader model calls, patched {count}")
+              visual_old = '''        completion = client.beta.chat.completions.parse(
+              model=chosen_model,
+          '''
+              visual_new = '''        completion = client.beta.chat.completions.parse(
+              model=chosen_model,
+              reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
+          '''
+              text_old = '''    completion = _client(api_key).beta.chat.completions.parse(
+          model=chosen_model,
+      '''
+              text_new = '''    completion = _client(api_key).beta.chat.completions.parse(
+          model=chosen_model,
+          reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
+      '''
+              if llm.count(visual_old) != 1:
+                  raise RuntimeError(f"Expected one visual reader API call, found {llm.count(visual_old)}")
+              if llm.count(text_old) != 2:
+                  raise RuntimeError(f"Expected two text reader API calls, found {llm.count(text_old)}")
+              llm = llm.replace(visual_old, visual_new, 1)
+              llm = llm.replace(text_old, text_new, 2)
               llm_path.write_text(llm, encoding="utf-8")
-          elif llm.count(effort_line) != 4:
+          if llm_path.read_text(encoding="utf-8").count(effort_line) != 3:
               raise RuntimeError("Reader reasoning-effort configuration is inconsistent")
 
           # Acceptance logic: absolute thresholds are final success floors, not
