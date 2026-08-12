@@ -1,19 +1,19 @@
 {
-  "baseline_id": "corpus_baseline_v1_2026-08-11",
+  "baseline_id": "corpus_lca_title_22_2026-08-12",
   "canary_dois": [
     "10.1007/s11367-025-02453-8",
     "10.1007/s11367-025-02524-w",
-    "10.1007/s11367-026-02685-2",
     "10.1007/s11367-026-02671-8",
     "10.1007/s11367-024-02375-x",
-    "10.1007/s11367-025-02517-9",
-    "10.1007/s11367-024-02412-9",
-    "10.1007/s11367-025-02454-7"
+    "10.1007/s11367-025-02454-7",
+    "10.1007/s11367-025-02548-2",
+    "10.1007/s11367-025-02462-7",
+    "10.1007/s11367-025-02538-4"
   ],
   "resolved_regression_controls": [
-    "10.1007/s11367-026-02685-2",
-    "10.1007/s11367-026-02671-8"
+    "10.1007/s11367-026-02671-8",
+    "10.1007/s11367-025-02548-2"
   ],
-  "selection_rule": "Represent leading recurring failure classes from zero-token diagnostics and retain two structurally demanding resolved controls.",
-  "purpose": "Fast development gate before affected-cohort and full-44 replay."
+  "selection_rule": "Representative active-corpus unresolved cases plus both resolved controls; every DOI is inside the 22-paper operational corpus.",
+  "purpose": "Fast development gate before affected-cohort and full 22-paper replay."
 }
