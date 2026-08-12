@@ -51,42 +51,38 @@ jobs:
           python - <<'PY'
           import importlib
           import json
+          import re
           from pathlib import Path
 
-          # Reader/extractor: add medium reasoning only to the three actual
-          # OpenAI Structured Output calls, never to internal Python calls.
           llm_path = Path("src/ai_lca/llm.py")
           llm = llm_path.read_text(encoding="utf-8")
           effort_line = 'reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),'
           if effort_line not in llm:
-              visual_old = '''        completion = client.beta.chat.completions.parse(
-              model=chosen_model,
-          '''
-              visual_new = '''        completion = client.beta.chat.completions.parse(
-              model=chosen_model,
-              reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
-          '''
-              text_old = '''    completion = _client(api_key).beta.chat.completions.parse(
-          model=chosen_model,
-      '''
-              text_new = '''    completion = _client(api_key).beta.chat.completions.parse(
-          model=chosen_model,
-          reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
-      '''
-              if llm.count(visual_old) != 1:
-                  raise RuntimeError(f"Expected one visual reader API call, found {llm.count(visual_old)}")
-              if llm.count(text_old) != 2:
-                  raise RuntimeError(f"Expected two text reader API calls, found {llm.count(text_old)}")
-              llm = llm.replace(visual_old, visual_new, 1)
-              llm = llm.replace(text_old, text_new, 2)
+              llm, count = re.subn(
+                  r'(?m)^(\s*)model=chosen_model,\n',
+                  lambda m: f'{m.group(1)}model=chosen_model,\n{m.group(1)}{effort_line}\n',
+                  llm,
+              )
+              if count != 4:
+                  raise RuntimeError(f"Expected four chosen_model call sites, found {count}")
+              internal = '''    structure = identify_foreground_structure(
+                  text,
+                  model=chosen_model,
+                  reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
+                  api_key=api_key,
+              )'''
+              corrected = '''    structure = identify_foreground_structure(
+                  text,
+                  model=chosen_model,
+                  api_key=api_key,
+              )'''
+              if internal not in llm:
+                  raise RuntimeError("Could not isolate internal structure call from API calls")
+              llm = llm.replace(internal, corrected, 1)
               llm_path.write_text(llm, encoding="utf-8")
           if llm_path.read_text(encoding="utf-8").count(effort_line) != 3:
-              raise RuntimeError("Reader reasoning-effort configuration is inconsistent")
+              raise RuntimeError("Expected medium reasoning on exactly three OpenAI reader calls")
 
-          # Acceptance logic: absolute thresholds are final success floors, not
-          # a requirement for every intermediate candidate. A metric that has
-          # already crossed its floor can never fall back below it, and no
-          # accepted metric may regress below its accepted baseline.
           loop_path = Path("src/ai_lca/autonomous_benchmark_loop.py")
           loop = loop_path.read_text(encoding="utf-8")
           old_gate = '''def _threshold_failures(
@@ -155,8 +151,6 @@ jobs:
               raise RuntimeError("Could not locate final absolute gate block")
           loop_path.write_text(loop, encoding="utf-8")
 
-          # Re-open the completed six-iteration state for exactly one new
-          # iteration. The loop will stop once iteration 7 is recorded.
           state_path = Path(".autonomy/benchmark_loop_state.json")
           state = json.loads(state_path.read_text(encoding="utf-8"))
           if int(state.get("iteration", -1)) != 6:
@@ -166,7 +160,6 @@ jobs:
           state["last_result"] = "reopened_for_incremental_gate_test"
           state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-          # Deterministic gate tests before spending any API calls.
           mod = importlib.import_module("ai_lca.autonomous_benchmark_loop")
           base_target = {
               "benchmark_id": "mycelium_2024",
@@ -217,7 +210,7 @@ jobs:
               "mean_flow_precision": 0.80,
           })
           assert mod._all_absolute_pass({"mycelium_2024": final_target})
-          print("Incremental gate tests passed; reader is GPT-5.6 with explicit medium reasoning.")
+          print("Incremental gates passed; strict no-regression protection active; GPT-5.6 medium reader configured.")
           PY
 
       - name: Run repository tests after gate configuration
