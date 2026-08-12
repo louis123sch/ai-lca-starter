@@ -1,15 +1,6 @@
-name: Gerloff unseen validation benchmark
+name: Gerloff regression benchmark
 
 on:
-  push:
-    branches: [main, gerloff-recall-stability]
-    paths:
-      - "src/**"
-      - "tests/**"
-      - "benchmarks/gerloff_2021/**"
-      - "pyproject.toml"
-      - ".github/workflows/gerloff-benchmark.yml"
-      - "scripts/run_resilient_benchmark.sh"
   workflow_dispatch:
     inputs:
       runs:
@@ -30,16 +21,13 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-
       - name: Install package
         run: python -m pip install -e ".[test]"
-
       - name: Run tests
         run: python -m pytest -q
 
@@ -56,20 +44,16 @@ jobs:
       OPENAI_VISION_MODEL: gpt-5-mini
       AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
       AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-
       - name: Install package
         run: python -m pip install -e ".[test]"
-
       - name: Verify OpenAI secret exists
         shell: bash
         run: |
@@ -77,22 +61,14 @@ jobs:
             echo "::error::Repository secret OPENAI_API_KEY is missing."
             exit 2
           fi
-
       - name: Expand machine-readable supplementary workbook fixture
         shell: bash
         run: gzip -dc benchmarks/gerloff_2021/source_supplement_workbook.txt.gz > benchmarks/gerloff_2021/source_supplement_workbook.txt
-
       - name: Run Gerloff machine-readable extraction benchmark
         shell: bash
         run: |
           RUNS="${{ github.event.inputs.runs }}"
-          if [ -z "$RUNS" ]; then
-            if [ "${{ github.ref_name }}" = "gerloff-recall-stability" ]; then
-              RUNS=1
-            else
-              RUNS=3
-            fi
-          fi
+          if [ -z "$RUNS" ]; then RUNS=3; fi
           echo "Running $RUNS independent extractions with machine-readable supplementary inventory"
           bash scripts/run_resilient_benchmark.sh \
             python -m ai_lca.benchmark_multimodal \
@@ -105,19 +81,16 @@ jobs:
               --model "$OPENAI_MODEL" \
               --max-visual-assets 0 \
               --output-dir benchmark_runs/gerloff_2021
-
-      - name: Enforce unseen-paper quality gate
+      - name: Enforce regression quality gate
         shell: bash
         run: |
           python - <<'PY'
           import json
           import statistics
           from pathlib import Path
-
           out = Path("benchmark_runs/gerloff_2021")
           summary = json.loads((out / "summary.json").read_text())
           reports = [json.loads(p.read_text()) for p in sorted(out.glob("report_run_*.json"))]
-
           mean_score = float(summary["mean_overall_score"])
           min_score = float(summary["min_overall_score"])
           process_recall = float(summary["mean_process_recall"])
@@ -125,10 +98,6 @@ jobs:
           flow_recall = float(summary["mean_flow_recall"])
           flow_precision = float(summary["mean_flow_precision"])
           amount_accuracy = statistics.fmean(float(r["amount_accuracy"]) for r in reports)
-          fu_accuracy = statistics.fmean(float(r["functional_unit_accuracy"]) for r in reports)
-          boundary_accuracy = statistics.fmean(float(r["system_boundary_accuracy"]) for r in reports)
-          geography_accuracy = statistics.fmean(float(r["geography_accuracy"]) for r in reports)
-
           print(f"Mean overall score:      {mean_score:.3f}")
           print(f"Minimum run score:       {min_score:.3f}")
           print(f"Mean process recall:     {process_recall:.3f}")
@@ -136,35 +105,20 @@ jobs:
           print(f"Mean flow recall:        {flow_recall:.3f}")
           print(f"Mean flow precision:     {flow_precision:.3f}")
           print(f"Mean amount accuracy:    {amount_accuracy:.3f}")
-          print(f"Functional unit:         {fu_accuracy:.3f}")
-          print(f"System boundary:         {boundary_accuracy:.3f}")
-          print(f"Geography:               {geography_accuracy:.3f}")
-
           failures = []
-          if mean_score < 0.85:
-              failures.append(f"mean overall score {mean_score:.3f} < 0.850")
-          if min_score < 0.80:
-              failures.append(f"minimum run score {min_score:.3f} < 0.800")
-          if process_recall < 0.90:
-              failures.append(f"process recall {process_recall:.3f} < 0.900")
-          if process_precision < 0.90:
-              failures.append(f"process precision {process_precision:.3f} < 0.900")
-          if flow_recall < 0.85:
-              failures.append(f"flow recall {flow_recall:.3f} < 0.850")
-          if flow_precision < 0.85:
-              failures.append(f"flow precision {flow_precision:.3f} < 0.850")
-          if amount_accuracy < 0.85:
-              failures.append(f"amount accuracy {amount_accuracy:.3f} < 0.850")
-
+          if mean_score < 0.85: failures.append(f"mean overall score {mean_score:.3f} < 0.850")
+          if min_score < 0.80: failures.append(f"minimum run score {min_score:.3f} < 0.800")
+          if process_recall < 0.90: failures.append(f"process recall {process_recall:.3f} < 0.900")
+          if process_precision < 0.90: failures.append(f"process precision {process_precision:.3f} < 0.900")
+          if flow_recall < 0.85: failures.append(f"flow recall {flow_recall:.3f} < 0.850")
+          if flow_precision < 0.85: failures.append(f"flow precision {flow_precision:.3f} < 0.850")
+          if amount_accuracy < 0.85: failures.append(f"amount accuracy {amount_accuracy:.3f} < 0.850")
           if failures:
-              print("Gerloff unseen benchmark gate failed:")
-              for failure in failures:
-                  print(f" - {failure}")
+              print("Gerloff regression gate failed:")
+              for failure in failures: print(f" - {failure}")
               raise SystemExit(1)
-
-          print("Gerloff unseen benchmark gate passed.")
+          print("Gerloff regression benchmark passed.")
           PY
-
       - name: Upload Gerloff benchmark reports
         if: always()
         uses: actions/upload-artifact@v4

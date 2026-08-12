@@ -63,7 +63,7 @@ Rules:
 11. Internal stages/component groups do not require new process IDs. If the locked structure has one process, attach source-supported flows from its internal inventory sections to that process.
 12. linked_process_id is ONLY for an explicit foreground-to-foreground exchange between two IDs already present in the locked structure. Set it null for ordinary background inputs, emissions, and outputs. Never infer a link merely because two processes use the same material or service.
 13. Treat [VISUAL EVIDENCE: ...] blocks exactly like source evidence: use only visibly transcribed content and preserve provenance.
-14. Include a short evidence_text snippet for every flow. Populate document/page/paragraph/table only from explicit source markers.
+14. Include a short evidence_text snippet for every flow. Populate document/page/paragraph/table only from explicit provenance markers.
 15. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
 
 Protected extraction invariants:
@@ -112,7 +112,12 @@ class VisualEvidenceBatch(BaseModel):
 
 
 def _client(api_key: str | None = None) -> OpenAI:
-    return OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+    timeout_seconds = float(os.getenv("OPENAI_REQUEST_TIMEOUT_SECONDS", "180"))
+    return OpenAI(
+        api_key=api_key or os.getenv("OPENAI_API_KEY"),
+        timeout=timeout_seconds,
+        max_retries=0,
+    )
 
 
 def _visual_data_url(asset: VisualAsset) -> str:

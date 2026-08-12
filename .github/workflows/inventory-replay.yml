@@ -1,0 +1,117 @@
+name: Inventory corpus replay
+
+on:
+  workflow_dispatch:
+    inputs:
+      gate:
+        description: "Replay gate"
+        required: true
+        default: "diagnostics"
+        type: choice
+        options:
+          - diagnostics
+          - micro
+          - canary
+          - cohort
+          - full
+      cohort:
+        description: "Failure class for cohort gate"
+        required: false
+        default: "TABLE_HEAVY_UNRESOLVED"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: inventory-corpus-replay-${{ inputs.gate }}
+  cancel-in-progress: true
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  SPRINGER_API_KEY: ${{ secrets.SPRINGER_API_KEY }}
+  OPENAI_MODEL: gpt-5-mini
+  OPENAI_SCREEN_MODEL: gpt-5-nano
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: inventory-recall-development
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Restore frozen corpus cache
+        id: corpus-cache
+        uses: actions/cache@v4
+        with:
+          path: corpus_baseline_state
+          key: corpus-baseline-v1-1-2026-08-11-artifact-9094408729
+      - name: Seed frozen corpus from baseline artifact
+        if: steps.corpus-cache.outputs.cache-hit != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-scale-31473783816
+          path: corpus_baseline_state
+          repository: louis123sch/ai-lca-starter
+          run-id: 31473783816
+          github-token: ${{ github.token }}
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Reset working corpus
+        run: |
+          rm -rf literature_state artifacts
+          cp -a corpus_baseline_state literature_state
+          mkdir -p artifacts
+      - name: Zero-token exact-corpus diagnostics
+        run: |
+          python -m ai_lca.corpus_diagnostics --state-dir literature_state --output artifacts/diagnostics.json
+          python - <<'PY'
+          import json
+          report=json.load(open('artifacts/diagnostics.json'))
+          assert report['baseline_id'] == 'corpus_baseline_v1_1_2026-08-11'
+          assert report['paper_count'] == 44
+          assert report['status_counts'].get('UNRESOLVED_INVENTORY') == 37
+          assert report['status_counts'].get('COMPLETE') == 7
+          PY
+      - name: Verify API key for model-backed gates
+        if: inputs.gate != 'diagnostics'
+        shell: bash
+        run: test -n "$OPENAI_API_KEY" || { echo "::error::OPENAI_API_KEY missing"; exit 2; }
+      - name: Micro
+        if: inputs.gate == 'micro'
+        run: |
+          python -m ai_lca.inventory_micro --state-dir literature_state --subset canary \
+            --max-total-calls 15 --max-calls-per-paper 6 --max-total-tokens 250000 \
+            --max-estimated-cost-usd 0.25 --output artifacts/micro.json
+      - name: Canary
+        if: inputs.gate == 'canary'
+        run: |
+          python -m ai_lca.inventory_replay --state-dir literature_state --subset canary \
+            --max-total-calls 30 --max-calls-per-paper 7 --max-total-tokens 500000 \
+            --max-estimated-cost-usd 0.45 --output artifacts/canary.json
+      - name: Cohort
+        if: inputs.gate == 'cohort'
+        run: |
+          python -m ai_lca.inventory_replay --state-dir literature_state --subset cohort \
+            --cohort "${{ inputs.cohort }}" --max-total-calls 60 --max-calls-per-paper 8 \
+            --max-total-tokens 1000000 --max-estimated-cost-usd 0.90 \
+            --output artifacts/cohort.json
+      - name: Full 44
+        if: inputs.gate == 'full'
+        run: |
+          python -m ai_lca.inventory_replay --state-dir literature_state --subset full \
+            --max-total-calls 110 --max-calls-per-paper 8 --max-total-tokens 2000000 \
+            --max-estimated-cost-usd 1.50 --output artifacts/full.json
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inventory-replay-${{ inputs.gate }}-${{ github.run_id }}
+          path: artifacts
+          retention-days: 30
