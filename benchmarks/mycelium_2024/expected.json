@@ -1,0 +1,120 @@
+{
+  "benchmark_id": "mycelium_2024",
+  "scope": "Attributional cradle-to-grave LCA of 1 m2 of mycelium-based composite acoustic insulation panel including mounting. The benchmark retains the explicitly inventoried foreground unit processes and the literature-derived mycelium substrate subsystem, while treating rape-straw and buckwheat-husk production as background activities because the paper explicitly says they were modeled with ecoinvent datasets.",
+  "context": {
+    "functional_unit_terms": ["1 m2", "acoustic", "panel"],
+    "system_boundary": "cradle to grave",
+    "reference_geography": "Germany"
+  },
+  "processes": [
+    {"key":"mycelium_substrate","name":"Mycelium substrate production","aliases":["Mycelium substrate production","mycelium spawn production","mycelium spawn culture"]},
+    {"key":"raw_shredding","name":"Raw material shredding","aliases":["Raw material shredding","rapeseed straw shredding","rape straw shredding"]},
+    {"key":"primary_mixing","name":"Primary substrate mixing","aliases":["Primary substrate mixing","substrate mixing"]},
+    {"key":"sterilization","name":"Sterilization","aliases":["Sterilization","substrate sterilization"]},
+    {"key":"inoculation","name":"Inoculation","aliases":["Inoculation","substrate inoculation"]},
+    {"key":"primary_incubation","name":"Primary incubation","aliases":["Primary incubation","first incubation"]},
+    {"key":"substrate_shredding","name":"Substrate shredding","aliases":["Substrate shredding","pre-grown substrate shredding","substrate granulation"]},
+    {"key":"mold_production","name":"Mold production","aliases":["Mold production","mould production","PP mold production","PP mould production"]},
+    {"key":"filling_molds","name":"Filling of molds","aliases":["Filling of molds","Filling of moulds","mold filling","mould filling"]},
+    {"key":"secondary_incubation","name":"Secondary incubation","aliases":["Secondary incubation","second incubation"]},
+    {"key":"tertiary_incubation","name":"Tertiary incubation","aliases":["Tertiary incubation","third incubation"]},
+    {"key":"drying","name":"Drying / stabilization","aliases":["Drying / stabilization","Drying and stabilization","Drying","stabilization"]},
+    {"key":"printing","name":"3D-printing of mounting hardware","aliases":["3D-printing of mounting hardware","3D printing of mounting hardware","3D-printed mounting hardware","mounting pin production"]},
+    {"key":"mounting_material","name":"Mounting material production","aliases":["Mounting material production","mounting materials production"]},
+    {"key":"transport_sale","name":"Transport to point of sale","aliases":["Transport to point of sale","transport to distributor","shipping to distributor"]},
+    {"key":"transport_use","name":"Transport to point of use","aliases":["Transport to point of use","transport to building","transport to place of use"]},
+    {"key":"mounting","name":"Mounting in building","aliases":["Mounting in building","installation in building","mounting"]},
+    {"key":"unmounting","name":"Unmounting","aliases":["Unmounting","demolition","unmounting from building"]},
+    {"key":"transport_waste","name":"Transport to waste treatment","aliases":["Transport to waste treatment","transport to waste treatment facility"]},
+    {"key":"waste_treatment","name":"Waste treatment","aliases":["Waste treatment","waste processing"]},
+    {"key":"disposal","name":"Disposal","aliases":["Disposal","final disposal"]}
+  ],
+  "forbidden_process_terms": [
+    "Rape straw production",
+    "Buckwheat husk production",
+    "electric granulator",
+    "ribbon blender",
+    "autoclave",
+    "climate-controlled room",
+    "oven"
+  ],
+  "flows": [
+    {"process_key":"mycelium_substrate","name":"Mycelium spawn","aliases":["Mycelium spawn","spawn"],"amount":1.315,"unit":"kg","direction":"input"},
+    {"process_key":"mycelium_substrate","name":"Transport","aliases":["Transport","transportation"],"amount":450,"unit":"km","direction":"input"},
+
+    {"process_key":"raw_shredding","name":"Rape seed straw","aliases":["Rape seed straw","rapeseed straw","rape straw"],"amount":3.606,"unit":"kg","direction":"input"},
+    {"process_key":"raw_shredding","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":0.4695,"unit":"kWh","direction":"input"},
+
+    {"process_key":"primary_mixing","name":"Rapeseed straw, shredded","aliases":["rapeseed straw, shredded","shredded rapeseed straw","shredded rape straw"],"amount":3.606,"unit":"kg","direction":"input"},
+    {"process_key":"primary_mixing","name":"Tap water","aliases":["tap water","water"],"amount":15.65,"unit":"kg","direction":"input"},
+    {"process_key":"primary_mixing","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":0.4695,"unit":"kWh","direction":"input"},
+    {"process_key":"primary_mixing","name":"Buckwheat husks","aliases":["buckwheat husks","buckwheat husk"],"amount":5.728,"unit":"kg","direction":"input"},
+
+    {"process_key":"sterilization","name":"Primary substrate","aliases":["primary substrate","mixed substrate"],"amount":24.99,"unit":"kg","direction":"input"},
+    {"process_key":"sterilization","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":1.547,"unit":"kWh","direction":"input"},
+
+    {"process_key":"inoculation","name":"Primary substrate, sterilized","aliases":["primary substrate, sterilized","sterilized primary substrate","sterilized substrate"],"amount":24.99,"unit":"kg","direction":"input"},
+    {"process_key":"inoculation","name":"Mycelium spawn","aliases":["mycelium spawn","spawn"],"amount":1.315,"unit":"kg","direction":"input"},
+    {"process_key":"inoculation","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":0.2817,"unit":"kWh","direction":"input"},
+    {"process_key":"inoculation","name":"Substrate bags, PP","aliases":["substrate bags, PP","PP substrate bags","polypropylene substrate bags"],"amount":0.02191,"unit":"kg","direction":"input"},
+    {"process_key":"inoculation","name":"Corrugated board","aliases":["corrugated board","corrugated cardboard"],"amount":0.2191,"unit":"kg","direction":"input"},
+
+    {"process_key":"primary_incubation","name":"Substrate, inoculated","aliases":["substrate, inoculated","inoculated substrate"],"amount":26.30,"unit":"kg","direction":"input"},
+    {"process_key":"primary_incubation","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":1.972,"unit":"kWh","direction":"input"},
+
+    {"process_key":"substrate_shredding","name":"Pre-grown substrate","aliases":["pre-grown substrate","pregrown substrate"],"amount":26.08,"unit":"kg","direction":"input"},
+    {"process_key":"substrate_shredding","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":0.002629,"unit":"kWh","direction":"input"},
+
+    {"process_key":"mold_production","name":"Polypropylene, granulate","aliases":["polypropylene, granulate","polypropylene granulate","PP granulate"],"amount":0.03756,"unit":"kg","direction":"input"},
+    {"process_key":"mold_production","name":"Extrusion and thermoforming","aliases":["extrusion and thermoforming","extrusion and thermo-forming","thermoforming"],"amount":0.03833,"unit":"kg","direction":"input"},
+    {"process_key":"mold_production","name":"Transport","aliases":["Transport","transportation"],"amount":50,"unit":"km","direction":"input"},
+
+    {"process_key":"filling_molds","name":"Pre-grown substrate, shredded","aliases":["pre-grown substrate, shredded","shredded pre-grown substrate","shredded pregrown substrate"],"amount":26.08,"unit":"kg","direction":"input"},
+    {"process_key":"filling_molds","name":"Molds, PP","aliases":["molds, PP","PP molds","polypropylene molds","moulds, PP","PP moulds"],"amount":0.939,"unit":"kg","direction":"input"},
+    {"process_key":"filling_molds","name":"Wood anchors","aliases":["wood anchors","wood anchor"],"amount":0.00260,"unit":"m3","direction":"input"},
+
+    {"process_key":"secondary_incubation","name":"Panels, unfinished, in mold","aliases":["panels, unfinished, in mold","unfinished panels in mold","unfinished panel in mould"],"amount":27.25,"unit":"kg","direction":"input"},
+    {"process_key":"secondary_incubation","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":2.629,"unit":"kWh","direction":"input"},
+
+    {"process_key":"tertiary_incubation","name":"Panel, unfinished","aliases":["panel, unfinished","unfinished panel"],"amount":26.97,"unit":"kg","direction":"input"},
+    {"process_key":"tertiary_incubation","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":1.972,"unit":"kWh","direction":"input"},
+
+    {"process_key":"drying","name":"Panel, unfinished","aliases":["panel, unfinished","unfinished panel"],"amount":26.77,"unit":"kg","direction":"input"},
+    {"process_key":"drying","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":12.02,"unit":"kWh","direction":"input"},
+
+    {"process_key":"printing","name":"PLA","aliases":["PLA","polylactide","polylactic acid"],"amount":0.0313,"unit":"kg","direction":"input"},
+    {"process_key":"printing","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":0.08294,"unit":"kWh","direction":"input"},
+
+    {"process_key":"mounting_material","name":"Screws, steel","aliases":["screws, steel","steel screws","screws"],"amount":0.0924,"unit":"kg","direction":"input"},
+    {"process_key":"mounting_material","name":"Dowel, nylon","aliases":["dowel, nylon","nylon dowel","nylon dowels"],"amount":0.007653,"unit":"kg","direction":"input"},
+    {"process_key":"mounting_material","name":"Softwood lath","aliases":["softwood lath","softwood laths","wood lath"],"amount":0.2852,"unit":"kg","direction":"input"},
+    {"process_key":"mounting_material","name":"Transport","aliases":["Transport","transportation"],"amount":450,"unit":"km","direction":"input"},
+
+    {"process_key":"transport_sale","name":"Panel","aliases":["panel","acoustic panel"],"amount":12.27,"unit":"kg","direction":"input"},
+    {"process_key":"transport_sale","name":"Mounting materials","aliases":["mounting materials","mounting material"],"amount":0.4166,"unit":"kg","direction":"input"},
+    {"process_key":"transport_sale","name":"Corrugated board box","aliases":["corrugated board box","corrugated cardboard box","cardboard box"],"amount":0.8568,"unit":"kg","direction":"input"},
+    {"process_key":"transport_sale","name":"Packaging film","aliases":["packaging film","film packaging"],"amount":0.02934,"unit":"kg","direction":"input"},
+    {"process_key":"transport_sale","name":"Transport","aliases":["Transport","transportation"],"amount":450,"unit":"km","direction":"input"},
+
+    {"process_key":"transport_use","name":"Panel","aliases":["panel","acoustic panel"],"amount":12.27,"unit":"kg","direction":"input"},
+    {"process_key":"transport_use","name":"Mounting materials","aliases":["mounting materials","mounting material"],"amount":0.4166,"unit":"kg","direction":"input"},
+    {"process_key":"transport_use","name":"Corrugated board box","aliases":["corrugated board box","corrugated cardboard box","cardboard box"],"amount":0.8568,"unit":"kg","direction":"input"},
+    {"process_key":"transport_use","name":"Transport","aliases":["Transport","transportation"],"amount":50,"unit":"km","direction":"input"},
+
+    {"process_key":"mounting","name":"Panel","aliases":["panel","acoustic panel"],"amount":12.27,"unit":"kg","direction":"input"},
+    {"process_key":"mounting","name":"Mounting materials","aliases":["mounting materials","mounting material"],"amount":0.4166,"unit":"kg","direction":"input"},
+    {"process_key":"mounting","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":0.06,"unit":"kWh","direction":"input"},
+
+    {"process_key":"unmounting","name":"Electricity, low voltage","aliases":["Electricity, low voltage","low voltage electricity","electricity"],"amount":0.06,"unit":"kWh","direction":"input"},
+
+    {"process_key":"transport_waste","name":"Panel","aliases":["panel","acoustic panel"],"amount":12.27,"unit":"kg","direction":"input"},
+    {"process_key":"transport_waste","name":"Mounting materials","aliases":["mounting materials","mounting material"],"amount":0.4166,"unit":"kg","direction":"input"},
+    {"process_key":"transport_waste","name":"Transport","aliases":["Transport","transportation"],"amount":50,"unit":"km","direction":"input"},
+
+    {"process_key":"waste_treatment","name":"Biowaste, municipal incineration","aliases":["biowaste, municipal incineration","municipal incineration of biowaste","biowaste incineration"],"amount":12.27,"unit":"kg","direction":"input"},
+    {"process_key":"waste_treatment","name":"Waste wood","aliases":["waste wood","wood waste"],"amount":0.2852,"unit":"kg","direction":"input"},
+    {"process_key":"waste_treatment","name":"Waste plastic","aliases":["waste plastic","plastic waste"],"amount":0.039,"unit":"kg","direction":"input"},
+
+    {"process_key":"disposal","name":"Scrap steel","aliases":["scrap steel","steel scrap"],"amount":0.0924,"unit":"kg","direction":"input"}
+  ]
+}
