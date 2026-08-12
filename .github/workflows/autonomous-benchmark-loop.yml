@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: autonomous-benchmark-improvement-loop
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -45,7 +45,7 @@ jobs:
         run: test -n "$OPENAI_API_KEY"
 
       - name: Run bounded autonomous patch-read-benchmark loop
-        run: python -m ai_lca.autonomous_benchmark_loop --max-iterations 8
+        run: python -m ai_lca.autonomous_benchmark_loop --max-iterations 6
 
       - name: Upload loop evidence
         if: always()
