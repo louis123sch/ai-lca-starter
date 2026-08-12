@@ -27,7 +27,8 @@ env:
   OPENAI_REQUEST_TIMEOUT_SECONDS: "180"
   BASELINE_RUN_ID: "31473783816"
   BASELINE_ARTIFACT: "phase1-scale-31473783816"
-  BASELINE_ID: "corpus_baseline_v1_1_2026-08-11"
+  BASELINE_ID: "corpus_lca_title_22_2026-08-12"
+  CORPUS_MANIFEST: "benchmarks/corpus_lca_title_22_2026-08-12/selection.json"
   DEVELOPMENT_BRANCH: "inventory-recall-development"
 
 jobs:
@@ -77,20 +78,21 @@ jobs:
           python -m compileall -q app.py src tests
           python -m pytest -q
 
-      - name: Diagnose exact frozen corpus without API calls
+      - name: Diagnose active 22-paper corpus without API calls
         run: |
           rm -rf literature_state
           cp -a corpus_baseline_state literature_state
           mkdir -p artifacts
           python -m ai_lca.corpus_diagnostics \
             --state-dir literature_state \
+            --manifest "$CORPUS_MANIFEST" \
             --output artifacts/corpus_diagnostics.json
           python - <<'PY' >> "$GITHUB_ENV"
           import json
           report=json.load(open('artifacts/corpus_diagnostics.json'))
-          assert report['baseline_id'] == 'corpus_baseline_v1_1_2026-08-11', report['baseline_id']
-          assert report['paper_count'] == 44, report['paper_count']
-          assert report['status_counts'] == {'COMPLETE': 7, 'UNRESOLVED_INVENTORY': 37} or report['status_counts'] == {'UNRESOLVED_INVENTORY': 37, 'COMPLETE': 7}, report['status_counts']
+          assert report['baseline_id'] == 'corpus_lca_title_22_2026-08-12', report['baseline_id']
+          assert report['paper_count'] == 22, report['paper_count']
+          assert report['status_counts'] == {'COMPLETE': 2, 'UNRESOLVED_INVENTORY': 20} or report['status_counts'] == {'UNRESOLVED_INVENTORY': 20, 'COMPLETE': 2}, report['status_counts']
           top=report['failure_class_ranking'][0]
           print('TARGET_FAILURE_CLASS='+top['failure_class'])
           print('TARGET_AFFECTED_PAPERS='+str(top['affected_papers']))
@@ -130,6 +132,7 @@ jobs:
           cp -a corpus_baseline_state literature_state
           python -m ai_lca.inventory_micro \
             --state-dir literature_state \
+            --manifest "$CORPUS_MANIFEST" \
             --subset canary \
             --max-total-calls 15 \
             --max-calls-per-paper 6 \
@@ -146,6 +149,7 @@ jobs:
           cp -a corpus_baseline_state literature_state
           python -m ai_lca.inventory_replay \
             --state-dir literature_state \
+            --manifest "$CORPUS_MANIFEST" \
             --subset canary \
             --max-total-calls 30 \
             --max-calls-per-paper 7 \
@@ -162,6 +166,7 @@ jobs:
           cp -a corpus_baseline_state literature_state
           python -m ai_lca.inventory_replay \
             --state-dir literature_state \
+            --manifest "$CORPUS_MANIFEST" \
             --subset cohort \
             --cohort "$TARGET_FAILURE_CLASS" \
             --max-total-calls 60 \
@@ -170,7 +175,7 @@ jobs:
             --max-estimated-cost-usd 0.90 \
             --output artifacts/cohort.json
 
-      - name: Full 44-paper regression gate
+      - name: Full 22-paper regression gate
         id: full_gate
         if: steps.repair_change.outputs.has_change == 'true' && steps.micro_gate.outcome == 'success' && steps.canary_gate.outcome == 'success' && steps.cohort_gate.outcome == 'success'
         continue-on-error: true
@@ -179,6 +184,7 @@ jobs:
           cp -a corpus_baseline_state literature_state
           python -m ai_lca.inventory_replay \
             --state-dir literature_state \
+            --manifest "$CORPUS_MANIFEST" \
             --subset full \
             --max-total-calls 110 \
             --max-calls-per-paper 8 \
@@ -263,7 +269,7 @@ jobs:
               --base main \
               --head inventory-recall-development \
               --title "Validated corpus-driven inventory recall improvements" \
-              --body "Autonomous development changes that passed deterministic tests, micro replay, the 8-paper canary, the affected failure cohort, and the full 44-paper regression. Promotion remains human-reviewed; no automatic merge to main."
+              --body "Autonomous development changes that passed deterministic tests, micro replay, the 8-paper canary, the affected failure cohort, and the full 22-paper regression. Promotion remains human-reviewed; no automatic merge to main."
           else
             gh pr comment "$PR_NUMBER" --body "Accepted another bounded iteration for **$TARGET_FAILURE_CLASS** after all four corpus gates passed. The branch has been updated; promotion remains manual."
           fi
