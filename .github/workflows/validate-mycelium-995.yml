@@ -42,25 +42,8 @@ jobs:
         run: test -n "$OPENAI_API_KEY"
 
       - name: Reorder validation so repository tests use the production evaluator
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("scripts/validate_mycelium_995_candidate.py")
-          text = path.read_text(encoding="utf-8")
-          old = '''    apply_candidate()
-    apply_temporary_evaluator_fixes()
-    run("python", "-m", "pytest", "-q")
-    results = run_regressions()
-'''
-          new = '''    apply_candidate()
-    run("python", "-m", "pytest", "-q")
-    apply_temporary_evaluator_fixes()
-    results = run_regressions()
-'''
-          if text.count(old) != 1:
-              raise RuntimeError(f"Expected one validation-order block, found {text.count(old)}")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
-          PY
+        run: >-
+          python -c 'from pathlib import Path; p=Path("scripts/validate_mycelium_995_candidate.py"); t=p.read_text(); old="    apply_candidate()\n    apply_temporary_evaluator_fixes()\n    run(\"python\", \"-m\", \"pytest\", \"-q\")\n    results = run_regressions()\n"; new="    apply_candidate()\n    run(\"python\", \"-m\", \"pytest\", \"-q\")\n    apply_temporary_evaluator_fixes()\n    results = run_regressions()\n"; assert t.count(old)==1, t.count(old); p.write_text(t.replace(old,new,1))'
 
       - name: Validate candidate without rerunning Mycelium
         run: python scripts/validate_mycelium_995_candidate.py
