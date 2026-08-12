@@ -1,0 +1,73 @@
+[DOCUMENT: Weinland et al. 2024 + Supplementary Information]
+
+[GOAL AND SCOPE]
+Attributional cradle-to-grave LCA of mycelium-based composite acoustic insulation panels including mounting system. Declared unit: 1 m2 of acoustic insulation panel. Foreground production is in Hamburg, Germany. Ecoinvent 3.9.1 cut-off is used for background data.
+
+The supplementary information states: "The following table summarizes life cycle inventory flows into the product system. Amounts per declared unit of 1 m2 of acoustic insulation panel."
+
+[TABLE: LIFE CYCLE INVENTORY]
+Life Cycle Phase | Module | Unit Process | Flow | Amount | Unit | Source Process
+Raw material / energy production and Transports | A1 & A2 | Mycelium substrate production | Mycelium spawn | 1.315 | kg | Leiva et al. (2015)
+Raw material / energy production and Transports | A1 & A2 | Mycelium substrate production | Transport | 450 | km | ecoinvent
+Raw material / energy production and Transports | A1 & A2 | Rape straw production | Rape straw | 3.606 | kg | ecoinvent [proxy: straw]
+Raw material / energy production and Transports | A1 & A2 | Rape straw production | Transport | 50 | km | ecoinvent
+Raw material / energy production and Transports | A1 & A2 | Buckwheat husk production | Buckwheat husks | 5.728 | kg | ecoinvent [proxy: flax husks]
+Raw material / energy production and Transports | A1 & A2 | Buckwheat husk production | Transport | 50 | km | ecoinvent
+Manufacturing | A3 | Raw material shredding | Rape seed straw | 3.606 | kg | ecoinvent
+Manufacturing | A3 | Raw material shredding | Electricity, low voltage | 0.4695 | kWh | ecoinvent
+Manufacturing | A3 | Primary substrate mixing | rapeseed straw, shredded | 3.606 | kg | internal flow
+Manufacturing | A3 | Primary substrate mixing | tap water | 15.65 | kg | ecoinvent
+Manufacturing | A3 | Primary substrate mixing | electricity, low voltage | 0.4695 | kWh | ecoinvent
+Manufacturing | A3 | Primary substrate mixing | buckwheat husks | 5.728 | kg | ecoinvent [proxy: flax husks]
+Manufacturing | A3 | Sterilization | primary substrate | 24.99 | kg | internal flow
+Manufacturing | A3 | Sterilization | electricity, low voltage | 1.547 | kWh | ecoinvent
+Manufacturing | A3 | Inoculation | primary substrate, sterilized | 24.99 | kg | internal flow
+Manufacturing | A3 | Inoculation | mycelium spawn | 1.315 | kg | Leiva et al. (2015)
+Manufacturing | A3 | Inoculation | electricity, low voltage | 0.2817 | kWh | ecoinvent
+Manufacturing | A3 | Inoculation | substrate bags, PP | 0.02191 | kg | ecoinvent
+Manufacturing | A3 | Inoculation | corrugated board | 0.2191 | kg | ecoinvent
+Manufacturing | A3 | Primary incubation | substrate, inoculated | 26.30 | kg | internal flow
+Manufacturing | A3 | Primary incubation | electricity, low voltage | 1.972 | kWh | ecoinvent
+Manufacturing | A3 | Substrate shredding | pre-grown substrate | 26.08 | kg | internal flow
+Manufacturing | A3 | Substrate shredding | electricity, low voltage | 0.002629 | kWh | ecoinvent
+Manufacturing | A3 | Mold production | polypropylene, granulate | 0.03756 | kg | ecoinvent
+Manufacturing | A3 | Mold production | extrusion and thermoforming | 0.03833 | kg | ecoinvent
+Manufacturing | A3 | Mold production | Transport | 50 | km | ecoinvent
+Manufacturing | A3 | Filling of molds | pre-grown substrate, shredded | 26.08 | kg | internal flow
+Manufacturing | A3 | Filling of molds | molds, PP | 0.939 | kg | internal flow
+Manufacturing | A3 | Filling of molds | wood anchors | 0.00260 | m3 | ecoinvent
+Manufacturing | A3 | Secondary incubation | panels, unfinished, in mold | 27.25 | kg | internal flow
+Manufacturing | A3 | Secondary incubation | electricity, low voltage | 2.629 | kWh | ecoinvent
+Manufacturing | A3 | Tertiary incubation | panel, unfinished | 26.97 | kg | internal flow
+Manufacturing | A3 | Tertiary incubation | electricity, low voltage | 1.972 | kWh | internal flow
+Manufacturing | A3 | Drying / stabilization | panel, unfinished | 26.77 | kg | internal flow
+Manufacturing | A3 | Drying / stabilization | electricity, low voltage | 12.02 | kWh | ecoinvent
+Manufacturing | A3 | 3D-printing of mounting hardware | PLA | 0.0313 | kg | ecoinvent
+Manufacturing | A3 | 3D-printing of mounting hardware | electricity, low voltage | 0.08294 | kWh | ecoinvent
+Manufacturing | A3 | Mounting material production | screws, steel | 0.0924 | kg | ecoinvent
+Manufacturing | A3 | Mounting material production | dowel, nylon | 0.007653 | kg | ecoinvent
+Manufacturing | A3 | Mounting material production | softwood lath | 0.2852 | kg | ecoinvent
+Manufacturing | A3 | Mounting material production | Transport | 450 | km | ecoinvent
+Transports | A4 | Transport to point of sale | panel | 12.27 | kg | internal flow
+Transports | A4 | Transport to point of sale | mounting materials | 0.4166 | kg | internal flow
+Transports | A4 | Transport to point of sale | corrugated board box | 0.8568 | kg | ecoinvent
+Transports | A4 | Transport to point of sale | packaging film | 0.02934 | kg | ecoinvent
+Transports | A4 | Transport to point of sale | transport | 450 | km | ecoinvent
+Transports | A4 | Transport to point of use | panel | 12.27 | kg | internal flow
+Transports | A4 | Transport to point of use | mounting materials | 0.4166 | kg | internal flow
+Transports | A4 | Transport to point of use | corrugated board box | 0.8568 | kg | ecoinvent
+Transports | A4 | Transport to point of use | transport | 50 | km | ecoinvent
+Mounting in Building | A5 | Mounting in building | panel | 12.27 | kg | internal flow
+Mounting in Building | A5 | Mounting in building | mounting materials | 0.4166 | kg | internal flow
+Mounting in Building | A5 | Mounting in building | electricity, low voltage | 0.06 | kWh | ecoinvent
+Destruction | C1 | Unmounting | electricity, low voltage | 0.06 | kWh | ecoinvent
+Transport to waste treatment | C2 | Transport to waste treatment | panel | 12.27 | kg | internal flow
+Transport to waste treatment | C2 | Transport to waste treatment | mounting materials | 0.4166 | kg | internal flow
+Transport to waste treatment | C2 | Transport to waste treatment | transport | 50 | km | ecoinvent
+Waste treatment | C3 | Waste treatment | biowaste, municipal incineration | 12.27 | kg | ecoinvent
+Waste treatment | C3 | Waste treatment | waste wood | 0.2852 | kg | ecoinvent
+Waste treatment | C3 | Waste treatment | waste plastic | 0.039 | kg | ecoinvent
+Waste treatment | C4 | Disposal | scrap steel | 0.0924 | kg | ecoinvent
+
+[MAIN PAPER PROCESS DESCRIPTION]
+Manufacturing starts with shredding rapeseed straw, then mixing with water and buckwheat husks, sterilization, inoculation, primary incubation, shredding, filling molds, secondary incubation, demolding/tertiary incubation and drying. The paper states that mycelium spawn culture was modeled as a subsystem based on Leiva et al. (2015). Background raw material activities and database proxies are supplied by ecoinvent.
