@@ -1,0 +1,57 @@
+name: Autonomous benchmark improvement loop
+
+on:
+  push:
+    branches:
+      - agent/autonomous-benchmark-loop
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autonomous-benchmark-improvement-loop
+  cancel-in-progress: false
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENAI_MODEL: gpt-5-mini
+  OPENAI_REPAIR_MODEL: gpt-5-mini
+  OPENAI_REPAIR_REASONING_EFFORT: medium
+  AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+  AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
+
+jobs:
+  iterate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out autonomous development branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/autonomous-benchmark-loop
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: python -m pip install -e ".[test]"
+
+      - name: Verify OpenAI secret
+        run: test -n "$OPENAI_API_KEY"
+
+      - name: Run bounded autonomous patch-read-benchmark loop
+        run: python -m ai_lca.autonomous_benchmark_loop --max-iterations 8
+
+      - name: Upload loop evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autonomous-benchmark-loop-${{ github.run_id }}
+          path: artifacts/autonomous_benchmark_loop
+          if-no-files-found: warn
+          retention-days: 30
