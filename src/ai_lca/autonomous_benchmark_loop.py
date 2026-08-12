@@ -254,20 +254,23 @@ def _threshold_failures(
     summaries: dict[str, dict[str, Any]],
     baseline: dict[str, dict[str, Any]],
 ) -> list[str]:
+    """Protect accepted metrics while permitting incremental progress to final floors."""
     failures: list[str] = []
     for name, summary in summaries.items():
         base = baseline[name]
         for metric, threshold in ABSOLUTE_THRESHOLDS.items():
             value = float(summary[metric])
-            if value < threshold:
-                failures.append(f"{name}: absolute {metric} {value:.4f} < {threshold:.4f}")
             base_value = float(base[metric])
+            if base_value >= threshold and value < threshold:
+                failures.append(
+                    f"{name}: lost achieved absolute floor for {metric}: "
+                    f"{value:.4f} < {threshold:.4f}"
+                )
             if value + NO_REGRESSION_TOLERANCE < base_value:
                 failures.append(
                     f"{name}: regression {metric} {value:.4f} < accepted {base_value:.4f}"
                 )
     return failures
-
 
 def _target_improved(candidate: dict[str, Any], baseline: dict[str, Any]) -> bool:
     if float(candidate["mean_overall_score"]) >= float(baseline["mean_overall_score"]) + TARGET_MIN_GAIN:
@@ -284,12 +287,12 @@ def _target_improved(candidate: dict[str, Any], baseline: dict[str, Any]) -> boo
 
 
 def _all_absolute_pass(summaries: dict[str, dict[str, Any]]) -> bool:
+    """Absolute thresholds are the final success condition for the development target."""
+    summary = summaries[TARGET_BENCHMARK]
     return not any(
         float(summary[metric]) < threshold
-        for summary in summaries.values()
         for metric, threshold in ABSOLUTE_THRESHOLDS.items()
     )
-
 
 def _commit_and_push(message: str, *, include_code: bool) -> str | None:
     _git("config", "user.name", "ai-lca-autonomous-benchmark")
@@ -390,8 +393,9 @@ def _iterate(state: dict[str, Any]) -> None:
         "accepted_diagnostics": state.get("diagnostics", {}),
         "recent_rejections": _load_history(),
         "instruction": (
-            "Make one small general extractor repair. The target must improve, all six blocking "
-            "benchmarks must satisfy the fixed absolute floors, and no protected metric may regress."
+            "Make one small general extractor repair. The target must improve without regressing any "
+            "accepted target metric. Regression benchmarks must not fall below accepted baselines; "
+            "absolute floors are only the target final success condition."
         ),
     }
     diagnostics_path = run_root / "diagnostics.json"

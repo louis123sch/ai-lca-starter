@@ -165,6 +165,7 @@ def transcribe_visual_evidence(
 
         completion = client.beta.chat.completions.parse(
             model=chosen_model,
+            reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
             messages=[
                 {"role": "system", "content": VISUAL_SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -235,6 +236,7 @@ def identify_foreground_structure(
 
     completion = _client(api_key).beta.chat.completions.parse(
         model=chosen_model,
+        reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
         messages=[
             {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -283,6 +285,7 @@ def extract_inventory_from_text(
 
     completion = _client(api_key).beta.chat.completions.parse(
         model=chosen_model,
+        reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
         messages=[
             {"role": "system", "content": FLOW_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
