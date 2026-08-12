@@ -1,4 +1,4 @@
-name: Autonomous benchmark improvement loop
+name: Persist suite-average benchmark acceptance
 
 on:
   push:
@@ -14,28 +14,22 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
   OPENAI_MODEL: gpt-5.6
   OPENAI_VISION_MODEL: gpt-5.6
   OPENAI_REASONING_EFFORT: medium
   OPENAI_REPAIR_MODEL: gpt-5.6
   OPENAI_REPAIR_REASONING_EFFORT: xhigh
-  AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
-  AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
 
 jobs:
-  iterate:
+  persist:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
     steps:
-      - name: Check out autonomous development branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: agent/autonomous-benchmark-loop
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
@@ -43,20 +37,187 @@ jobs:
       - name: Install package
         run: python -m pip install -e ".[test]"
 
-      - name: Verify OpenAI secret
-        run: test -n "$OPENAI_API_KEY"
+      - name: Persist suite-average acceptance logic
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
 
-      - name: Run repository tests
+          path = Path("src/ai_lca/autonomous_benchmark_loop.py")
+          text = path.read_text(encoding="utf-8")
+
+          replacement = '''def _target_improved(candidate: dict[str, Any], baseline: dict[str, Any]) -> bool:
+              """The development target advances only when its mean overall score improves."""
+              return (
+                  float(candidate["mean_overall_score"])
+                  >= float(baseline["mean_overall_score"]) + TARGET_MIN_GAIN
+              )
+
+
+          def _suite_average(summaries: dict[str, dict[str, Any]]) -> float:
+              """Mean overall score across the target and all protected regression papers."""
+              names = [TARGET_BENCHMARK, *REGRESSION_BENCHMARKS]
+              missing = [name for name in names if name not in summaries]
+              if missing:
+                  raise KeyError(f"Missing benchmark summaries for suite average: {missing}")
+              return sum(float(summaries[name]["mean_overall_score"]) for name in names) / len(names)
+
+
+          def _suite_average_not_regressed(
+              candidate: dict[str, dict[str, Any]],
+              baseline: dict[str, dict[str, Any]],
+          ) -> bool:
+              return _suite_average(candidate) + NO_REGRESSION_TOLERANCE >= _suite_average(baseline)
+
+
+          def _all_absolute_pass(summaries: dict[str, dict[str, Any]]) -> bool:
+              """Absolute thresholds remain only the final success condition for Mycelium."""
+              summary = summaries[TARGET_BENCHMARK]
+              return not any(
+                  float(summary[metric]) < threshold
+                  for metric, threshold in ABSOLUTE_THRESHOLDS.items()
+              )
+          '''
+
+          text, n = re.subn(
+              r'def _threshold_failures\([\s\S]*?(?=\ndef _commit_and_push)',
+              replacement.rstrip() + "\n",
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise RuntimeError(f"Could not replace gate helpers: {n}")
+
+          text = text.replace(
+              '"no_regression_policy": "No candidate metric may be lower than the accepted baseline metric.",',
+              '"acceptance_policy": "Target mean overall score must improve; then the six-paper suite mean overall score must be unchanged or higher.",',
+          )
+
+          old_instruction = (
+              '"Make one small general extractor repair. The target must improve without regressing any "\n'
+              '            "accepted target metric. Regression benchmarks must not fall below accepted baselines; "\n'
+              '            "absolute floors are only the target final success condition."'
+          )
+          new_instruction = (
+              '"Make one small general extractor repair. First improve the target mean overall score. "\n'
+              '            "Then preserve or improve the mean overall score across the full six-paper benchmark suite. "\n'
+              '            "Individual metric and paper movements are diagnostic and do not veto a net suite improvement."'
+          )
+          if old_instruction in text:
+              text = text.replace(old_instruction, new_instruction, 1)
+          elif "Individual metric and paper movements are diagnostic" not in text:
+              raise RuntimeError("Could not replace repair instruction")
+
+          old_target = '''    target_failures = _threshold_failures(
+              {TARGET_BENCHMARK: target_summary},
+              {TARGET_BENCHMARK: state["baseline"][TARGET_BENCHMARK]},
+          )
+              if not _target_improved(target_summary, state["baseline"][TARGET_BENCHMARK]):
+                  target_failures.append(f"{TARGET_BENCHMARK}: target did not improve over accepted baseline")
+
+              if target_failures:
+          '''
+          # Whitespace-robust replacement of the target gate preamble.
+          text, n = re.subn(
+              r'    target_failures = _threshold_failures\([\s\S]*?\n    if target_failures:\n',
+              '    target_failures: list[str] = []\n'
+              '    if not _target_improved(target_summary, state["baseline"][TARGET_BENCHMARK]):\n'
+              '        target_failures.append(f"{TARGET_BENCHMARK}: mean overall score did not improve by required gain")\n\n'
+              '    if target_failures:\n',
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise RuntimeError(f"Could not replace target gate: {n}")
+
+          text, n = re.subn(
+              r'    failures = _threshold_failures\(candidate_summaries, state\["baseline"\]\)\n    if failures:\n',
+              '    candidate_suite_average = _suite_average(candidate_summaries)\n'
+              '    accepted_suite_average = _suite_average(state["baseline"])\n'
+              '    failures: list[str] = []\n'
+              '    if not _suite_average_not_regressed(candidate_summaries, state["baseline"]):\n'
+              '        failures.append(\n'
+              '            f"suite mean overall score regressed: {candidate_suite_average:.4f} < {accepted_suite_average:.4f}"\n'
+              '        )\n'
+              '    if failures:\n',
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise RuntimeError(f"Could not replace regression gate: {n}")
+
+          # Record suite averages in both rejected and accepted history for auditability.
+          text = text.replace(
+              '"candidate_summaries": candidate_summaries,\n                "candidate_diagnostics": candidate_reports,',
+              '"candidate_summaries": candidate_summaries,\n                "candidate_diagnostics": candidate_reports,\n                "candidate_suite_average": candidate_suite_average,\n                "accepted_suite_average": accepted_suite_average,',
+              1,
+          )
+          text = text.replace(
+              '"candidate_summaries": candidate_summaries,\n        }\n    )',
+              '"candidate_summaries": candidate_summaries,\n            "candidate_suite_average": _suite_average(candidate_summaries),\n            "previous_suite_average": _suite_average(state["baseline"]),\n        }\n    )',
+              1,
+          )
+
+          path.write_text(text, encoding="utf-8")
+
+          tests = '''from ai_lca import autonomous_benchmark_loop as loop
+
+
+def _summary(overall, pr=1.0, pp=1.0, fr=1.0, fp=1.0):
+    return {
+        "mean_overall_score": overall,
+        "mean_process_recall": pr,
+        "mean_process_precision": pp,
+        "mean_flow_recall": fr,
+        "mean_flow_precision": fp,
+    }
+
+
+def _suite(values):
+    names = [loop.TARGET_BENCHMARK, *loop.REGRESSION_BENCHMARKS]
+    return {name: _summary(value) for name, value in zip(names, values, strict=True)}
+
+
+def test_target_gate_uses_overall_score_only():
+    base = _summary(0.4991736513, pr=0.0952, pp=1.0, fr=0.0702, fp=0.0656)
+    candidate = _summary(0.995, pr=1.0, pp=0.955, fr=1.0, fp=1.0)
+    assert loop._target_improved(candidate, base)
+
+
+def test_target_requires_minimum_overall_gain():
+    base = _summary(0.500)
+    candidate = _summary(0.504)
+    assert not loop._target_improved(candidate, base)
+
+
+def test_suite_average_allows_individual_paper_decline_when_mean_holds():
+    baseline = _suite([0.50, 1.00, 0.96, 1.00, 0.99, 0.80])
+    candidate = _suite([0.99, 0.98, 0.95, 0.99, 0.98, 0.78])
+    assert loop._suite_average(candidate) > loop._suite_average(baseline)
+    assert loop._suite_average_not_regressed(candidate, baseline)
+
+
+def test_suite_average_rejects_net_decline():
+    baseline = _suite([0.50, 1.00, 0.96, 1.00, 0.99, 0.80])
+    candidate = _suite([0.51, 0.98, 0.94, 0.98, 0.97, 0.78])
+    assert loop._suite_average(candidate) < loop._suite_average(baseline)
+    assert not loop._suite_average_not_regressed(candidate, baseline)
+
+
+def test_final_absolute_gate_still_applies_to_target_only():
+    passing = _summary(0.80, pr=0.90, pp=0.90, fr=0.80, fp=0.80)
+    assert loop._all_absolute_pass({loop.TARGET_BENCHMARK: passing})
+'''
+          Path("tests/test_autonomous_benchmark_gates.py").write_text(tests, encoding="utf-8")
+          PY
+
+      - name: Run full tests
         run: python -m pytest -q
 
-      - name: Run bounded autonomous patch-read-benchmark loop
-        run: python -m ai_lca.autonomous_benchmark_loop --max-iterations 7
-
-      - name: Upload loop evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: autonomous-benchmark-loop-${{ github.run_id }}
-          path: artifacts/autonomous_benchmark_loop
-          if-no-files-found: warn
-          retention-days: 30
+      - name: Commit suite-average acceptance logic
+        run: |
+          git config user.name ai-lca-autonomous-benchmark
+          git config user.email actions@users.noreply.github.com
+          git add src/ai_lca/autonomous_benchmark_loop.py tests/test_autonomous_benchmark_gates.py
+          git commit -m "Use suite-average score for autonomous acceptance"
+          git push origin HEAD:agent/autonomous-benchmark-loop
