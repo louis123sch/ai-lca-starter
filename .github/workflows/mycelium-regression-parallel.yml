@@ -1,0 +1,90 @@
+name: Mycelium candidate parallel regressions
+
+on:
+  push:
+    branches: [agent/mycelium-unit-process-regression]
+    paths:
+      - ".github/workflows/mycelium-regression-parallel.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        paper: [hermesmann_2022, gerloff_2021, yang_2024, gonzales_calienes_2025, afzal_2023, terlouw_2021]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5-mini
+      OPENAI_VISION_MODEL: gpt-5-mini
+      AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+      AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/mycelium-unit-process-regression
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[test]"
+      - name: Apply candidate rule in runner
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/ai_lca/llm.py'); s=p.read_text()
+          old="5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity, normally through its own reference product/reference unit or an explicit quantified foreground exchange. Do not manufacture a reference product to justify promotion."
+          new="""5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity, normally through its own reference product/reference unit or an explicit quantified foreground exchange. Do not manufacture a reference product to justify promotion.\n5a. An explicit foreground LCI table can itself provide that evidence when it names distinct unit processes and gives each process its own quantitative inventory, especially where intermediate rows are explicitly labelled as internal flows between those named unit processes. In that case, retain the source-named unit processes as interconnected_foreground_process activities rather than collapsing the quantified unit-process model into one product-system node.\n5b. This exception is evidence-specific: do NOT promote boxes from a process-flow diagram, descriptive unit operations, life-cycle-module headings, equipment/component lists, or background database activities unless the source also provides the distinct foreground-unit-process inventory or explicit quantified inter-process exchange described above."""
+          if new not in s:
+              if old not in s: raise SystemExit('Expected rule not found')
+              p.write_text(s.replace(old,new,1))
+          PY
+      - name: Run regression paper
+        shell: bash
+        run: |
+          set -e
+          P="${{ matrix.paper }}"
+          OUT="benchmark_runs/$P"
+          case "$P" in
+            hermesmann_2022)
+              bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/hermesmann_2022/expected.json --source benchmarks/hermesmann_2022/source_main_excerpt.txt benchmarks/hermesmann_2022/source_supplement_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir "$OUT" ;;
+            gerloff_2021)
+              gzip -dc benchmarks/gerloff_2021/source_supplement_workbook.txt.gz > benchmarks/gerloff_2021/source_supplement_workbook.txt
+              bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark_multimodal --expected benchmarks/gerloff_2021/expected.json --source benchmarks/gerloff_2021/source_main_excerpt.txt benchmarks/gerloff_2021/source_supplement_machine_readable.txt benchmarks/gerloff_2021/source_supplement_workbook.txt --runs 1 --model "$OPENAI_MODEL" --max-visual-assets 0 --output-dir "$OUT" ;;
+            yang_2024)
+              bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/yang_2024/expected.json --source benchmarks/yang_2024/source_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir "$OUT" ;;
+            gonzales_calienes_2025)
+              bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/gonzales_calienes_2025/expected.json --source benchmarks/gonzales_calienes_2025/source_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir "$OUT" ;;
+            afzal_2023)
+              bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/afzal_2023/expected.json --source benchmarks/afzal_2023/source_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir "$OUT" ;;
+            terlouw_2021)
+              bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live --expected benchmarks/terlouw_2021/expected.json --source benchmarks/terlouw_2021/source_excerpt.txt --runs 1 --model "$OPENAI_MODEL" --output-dir "$OUT" ;;
+          esac
+      - name: Enforce regression guard
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          paper=os.environ['PAPER']
+          s=json.loads((Path('benchmark_runs')/paper/'summary.json').read_text())
+          checks=[('overall',float(s['mean_overall_score']),.80),('process recall',float(s['mean_process_recall']),.90),('process precision',float(s['mean_process_precision']),.90),('flow recall',float(s['mean_flow_recall']),.80),('flow precision',float(s['mean_flow_precision']),.80)]
+          print(json.dumps(s,indent=2))
+          failed=[f'{n} {v:.3f} < {t:.3f}' for n,v,t in checks if v<t]
+          if failed:
+              print('\n'.join(failed)); raise SystemExit(1)
+          PY
+        env:
+          PAPER: ${{ matrix.paper }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-${{ matrix.paper }}-${{ github.run_id }}
+          path: benchmark_runs/${{ matrix.paper }}
+          if-no-files-found: warn
+          retention-days: 30
