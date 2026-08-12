@@ -65,20 +65,15 @@ jobs:
               )
               if count != 4:
                   raise RuntimeError(f"Expected four chosen_model call sites, found {count}")
-              internal = '''    structure = identify_foreground_structure(
-                  text,
-                  model=chosen_model,
-                  reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
-                  api_key=api_key,
-              )'''
-              corrected = '''    structure = identify_foreground_structure(
-                  text,
-                  model=chosen_model,
-                  api_key=api_key,
-              )'''
-              if internal not in llm:
-                  raise RuntimeError("Could not isolate internal structure call from API calls")
-              llm = llm.replace(internal, corrected, 1)
+              pattern = (
+                  r'(structure = identify_foreground_structure\(\n'
+                  r'\s*text,\n'
+                  r'\s*model=chosen_model,\n)'
+                  r'\s*reasoning_effort=os\.getenv\("OPENAI_REASONING_EFFORT", "medium"\),\n'
+              )
+              llm, removed = re.subn(pattern, r'\1', llm, count=1)
+              if removed != 1:
+                  raise RuntimeError(f"Expected to remove one accidental internal reasoning argument, removed {removed}")
               llm_path.write_text(llm, encoding="utf-8")
           if llm_path.read_text(encoding="utf-8").count(effort_line) != 3:
               raise RuntimeError("Expected medium reasoning on exactly three OpenAI reader calls")
