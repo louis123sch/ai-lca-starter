@@ -1,0 +1,78 @@
+name: Paper reader controlled iteration 2
+
+on:
+  push:
+    branches: [agent/paper-reader-controlled-iteration-2]
+    paths:
+      - ".control/run-screen-single-v2"
+      - ".control/run-screen-canary-v2"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: paper-reader-controlled-iteration-2
+  cancel-in-progress: false
+
+jobs:
+  controlled_screen_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/paper-reader-controlled-iteration-2
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Deterministic preflight
+        run: |
+          python -m pip install -e ".[test]"
+          python -m compileall -q src scripts tests
+          python -m pytest -q tests/test_autonomous_literature.py
+      - name: Resolve explicit scope
+        id: scope
+        shell: bash
+        run: |
+          changed=$(git diff --name-only HEAD^ HEAD)
+          if grep -qx '.control/run-screen-canary-v2' <<< "$changed"; then
+            echo "scope=canary" >> "$GITHUB_OUTPUT"
+          elif grep -qx '.control/run-screen-single-v2' <<< "$changed"; then
+            echo "scope=single" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No controlled-run sentinel changed"; exit 2
+          fi
+      - name: Verify OpenAI secret
+        run: test -n "$OPENAI_API_KEY" || { echo "::error::OPENAI_API_KEY missing"; exit 2; }
+      - name: Download exact frozen pre-PR15 corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: phase1-scale-31473783816
+          path: frozen_corpus
+          repository: louis123sch/ai-lca-starter
+          run-id: 31473783816
+          github-token: ${{ github.token }}
+      - name: Isolate corpus copy
+        run: cp -a frozen_corpus experiment_state
+      - name: Run screening-only experiment
+        run: |
+          mkdir -p artifacts
+          python scripts/controlled_screen_iteration2.py \
+            --state-dir experiment_state \
+            --scope "${{ steps.scope.outputs.scope }}" \
+            --max-total-calls 8 \
+            --max-total-tokens 100000 \
+            --max-estimated-cost-usd 0.01 \
+            --output artifacts/accuracy_iteration_v2.json
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-reader-controlled-v2-${{ github.run_id }}
+          path: artifacts
+          retention-days: 30
