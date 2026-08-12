@@ -1,0 +1,61 @@
+name: Apply validated social-LCA screen fix
+
+on:
+  push:
+    branches: [agent/reject-social-only-lca-screen]
+    paths:
+      - ".github/workflows/apply-screen-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reject-social-only-lca-screen
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Apply exact validated screen change
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/ai_lca/autonomous_literature.py')
+          text = p.read_text(encoding='utf-8')
+          old = '''SCREEN_SYSTEM_PROMPT = """You are a low-cost gate for an autonomous life-cycle assessment literature pipeline.
+          Decide whether the supplied article is a case/application LCA that is useful for reconstructing a foreground life-cycle inventory.
+          Pass only when the article actually performs an LCA, assesses concrete product systems/processes/configurations, and contains enough evidence that a foreground inventory is plausibly reconstructable.
+          Reject reviews, editorials, corrections, award notices, and purely methodological discussions without a reconstructable case inventory. Do not invent missing information."""'''
+          new = '''SCREEN_SYSTEM_PROMPT = """You are a low-cost gate for an autonomous life-cycle assessment literature pipeline.
+          Decide whether the supplied article is a case/application LCA that is useful for reconstructing a physical/environmental foreground life-cycle inventory for a Brightway-style model.
+          Pass only when the article actually performs an LCA, assesses concrete product systems/processes/configurations, and contains enough evidence that a physical foreground inventory of material, energy, service, waste, or elementary-emission exchanges is plausibly reconstructable.
+          Reject reviews, editorials, corrections, award notices, and purely methodological discussions without a reconstructable case inventory.
+          A social life cycle assessment (S-LCA), social organizational LCA, social-risk/hotspot assessment, or product social impact study does NOT qualify merely because it calls stakeholder indicators, social scores, working-condition data, or monetary/social variables an 'inventory'. Reject a social-only study when it does not provide a reconstructable physical/environmental foreground LCI.
+          Do NOT reject a study merely because it also contains social assessment: a mixed environmental + social study should pass when its environmental LCA contains a reconstructable physical foreground inventory.
+          Do not invent missing information."""'''
+          if old not in text:
+              raise SystemExit('expected SCREEN_SYSTEM_PROMPT block not found exactly')
+          text = text.replace(old, new, 1)
+          old_version = 'prompt_version="screen-v1"'
+          if text.count(old_version) != 1:
+              raise SystemExit(f'expected one screen-v1 cache key, found {text.count(old_version)}')
+          text = text.replace(old_version, 'prompt_version="screen-v2"', 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+      - name: Validate
+        run: |
+          python -m pip install -e ".[test]"
+          python -m compileall -q src tests
+          python -m pytest -q tests/test_autonomous_literature.py
+      - name: Commit validated change
+        run: |
+          git config user.name "louis123sch"
+          git config user.email "ls1524@ic.ac.uk"
+          git add src/ai_lca/autonomous_literature.py
+          git diff --cached --exit-code && { echo "::error::No source change produced"; exit 2; } || true
+          git commit -m "Reject social-only LCA from physical inventory pipeline"
+          git push origin HEAD:agent/reject-social-only-lca-screen
