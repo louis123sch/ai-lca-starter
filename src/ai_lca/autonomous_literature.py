@@ -27,9 +27,12 @@ PIPELINE_VERSION = "phase1-autonomous-v1"
 TERMINAL_STATUSES = {"COMPLETE", "SCREEN_REJECTED", "ACQUISITION_FAILED", "UNRESOLVED_STRUCTURE", "UNRESOLVED_INVENTORY"}
 
 SCREEN_SYSTEM_PROMPT = """You are a low-cost gate for an autonomous life-cycle assessment literature pipeline.
-Decide whether the supplied article is a case/application LCA that is useful for reconstructing a foreground life-cycle inventory.
-Pass only when the article actually performs an LCA, assesses concrete product systems/processes/configurations, and contains enough evidence that a foreground inventory is plausibly reconstructable.
-Reject reviews, editorials, corrections, award notices, and purely methodological discussions without a reconstructable case inventory. Do not invent missing information."""
+Decide whether the supplied article is a case/application LCA that is useful for reconstructing a physical/environmental foreground life-cycle inventory for a Brightway-style model.
+Pass only when the article actually performs an LCA, assesses concrete product systems/processes/configurations, and contains enough evidence that a physical foreground inventory of material, energy, service, waste, or elementary-emission exchanges is plausibly reconstructable.
+Reject reviews, editorials, corrections, award notices, and purely methodological discussions without a reconstructable case inventory.
+A social life cycle assessment (S-LCA), social organizational LCA, social-risk/hotspot assessment, or product social impact study does NOT qualify merely because it calls stakeholder indicators, social scores, working-condition data, or monetary/social variables an 'inventory'. Reject a social-only study when it does not provide a reconstructable physical/environmental foreground LCI.
+Do NOT reject a study merely because it also contains social assessment: a mixed environmental + social study should pass when its environmental LCA contains a reconstructable physical foreground inventory.
+Do not invent missing information."""
 
 STRUCTURE_REPAIR_SYSTEM_PROMPT = """You are repairing an already attempted foreground-process interpretation for a life-cycle assessment.
 Correct only the failed aspects using supplied source evidence. Reclassify existing source-supported candidates when possible instead of inventing entities. Do not promote components, equipment, inventory sections, life-cycle stages, or background supplies to foreground processes unless the source explicitly models them as independent foreground activities or assessed systems. Keep genuinely separate assessed alternatives. Preserve source-derived names and evidence. Never introduce unsupported ecoinvent detail. Return a complete ForegroundInterpretation."""
@@ -352,7 +355,7 @@ class PaperProcessor:
         if data is None: raise FileNotFoundError("Springer OA API returned no JATS article")
         path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(data); return data,path,hashlib.sha256(data).hexdigest()
     def _screen(self, doi, source_hash, doc, paper_dir):
-        path=paper_dir/"extraction"/"screen.json"; key=_job_key(doi,source_hash,"screen",process_id=None,model=self.config.screen_model,prompt_version="screen-v1")
+        path=paper_dir/"extraction"/"screen.json"; key=_job_key(doi,source_hash,"screen",process_id=None,model=self.config.screen_model,prompt_version="screen-v2")
         cached=self.store.completed_job_result(key)
         if cached: return _load_model(cached,EligibilityDecision)
         self.store.start_job(key,doi,"screen",model=self.config.screen_model)
