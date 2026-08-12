@@ -1,11 +1,14 @@
 from pathlib import Path
+import inspect
 
 from ai_lca.autonomous_literature import (
     ASSIGN_SYSTEM_PROMPT,
+    SCREEN_SYSTEM_PROMPT,
     Budget,
     CandidateAssignment,
     CandidateAssignmentBatch,
     CandidateFlow,
+    PaperProcessor,
     ProcessCandidateExtraction,
     RunConfig,
     StateStore,
@@ -59,6 +62,15 @@ def test_assignment_prompt_excludes_lcia_results_without_blocking_direct_emissio
     assert "direct elementary co2 emission" in prompt
     assert "copy only supplied candidate_ids exactly" in prompt
     assert "never invent wildcard or placeholder ids" in prompt
+
+
+def test_screen_prompt_rejects_social_only_but_keeps_mixed_environmental_lca():
+    prompt = SCREEN_SYSTEM_PROMPT.casefold()
+    assert "physical/environmental foreground life-cycle inventory" in prompt
+    assert "reject a social-only study" in prompt
+    assert "mixed environmental + social study should pass" in prompt
+    assert "material, energy, service, waste, or elementary-emission exchanges" in prompt
+    assert 'prompt_version="screen-v2"' in inspect.getsource(PaperProcessor._screen)
 
 
 def test_process_gate_detects_omitted_candidate():
