@@ -1,0 +1,64 @@
+name: Terlouw candidate stability check
+
+on:
+  push:
+    branches: [agent/mycelium-unit-process-regression]
+    paths:
+      - ".github/workflows/terlouw-candidate-stability.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5-mini
+      AI_LCA_INFRA_RETRY_ATTEMPTS: "3"
+      AI_LCA_INFRA_RETRY_BASE_DELAY_SECONDS: "15"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/mycelium-unit-process-regression
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[test]"
+      - name: Apply mycelium candidate rule
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/ai_lca/llm.py'); s=p.read_text()
+          old="5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity, normally through its own reference product/reference unit or an explicit quantified foreground exchange. Do not manufacture a reference product to justify promotion."
+          new="""5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity, normally through its own reference product/reference unit or an explicit quantified foreground exchange. Do not manufacture a reference product to justify promotion.\n5a. An explicit foreground LCI table can itself provide that evidence when it names distinct unit processes and gives each process its own quantitative inventory, especially where intermediate rows are explicitly labelled as internal flows between those named unit processes. In that case, retain the source-named unit processes as interconnected_foreground_process activities rather than collapsing the quantified unit-process model into one product-system node.\n5b. This exception is evidence-specific: do NOT promote boxes from a process-flow diagram, descriptive unit operations, life-cycle-module headings, equipment/component lists, or background database activities unless the source also provides the distinct foreground-unit-process inventory or explicit quantified inter-process exchange described above."""
+          if new not in s:
+              if old not in s: raise SystemExit('Expected rule not found')
+              p.write_text(s.replace(old,new,1))
+          PY
+      - name: Run three Terlouw candidate extractions
+        run: |
+          bash scripts/run_resilient_benchmark.sh python -m ai_lca.benchmark live \
+            --expected benchmarks/terlouw_2021/expected.json \
+            --source benchmarks/terlouw_2021/source_excerpt.txt \
+            --runs 3 --model "$OPENAI_MODEL" \
+            --output-dir benchmark_runs/terlouw_candidate
+      - name: Print comparison baseline
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path('benchmark_runs/terlouw_candidate/summary.json').read_text())
+          print(json.dumps(s,indent=2))
+          print('Historical frozen baseline: overall=.7831, process recall=1.0, process precision=.8095, flow recall=.6897, flow precision=.4843')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: terlouw-candidate-stability-${{ github.run_id }}
+          path: benchmark_runs/terlouw_candidate
+          if-no-files-found: warn
+          retention-days: 30
