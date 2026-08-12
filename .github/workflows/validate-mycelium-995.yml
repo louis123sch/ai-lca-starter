@@ -41,6 +41,27 @@ jobs:
       - name: Verify OpenAI secret
         run: test -n "$OPENAI_API_KEY"
 
+      - name: Reorder validation so repository tests use the production evaluator
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/validate_mycelium_995_candidate.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    apply_candidate()
+    apply_temporary_evaluator_fixes()
+    run("python", "-m", "pytest", "-q")
+    results = run_regressions()
+'''
+          new = '''    apply_candidate()
+    run("python", "-m", "pytest", "-q")
+    apply_temporary_evaluator_fixes()
+    results = run_regressions()
+'''
+          if text.count(old) != 1:
+              raise RuntimeError(f"Expected one validation-order block, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
       - name: Validate candidate without rerunning Mycelium
         run: python scripts/validate_mycelium_995_candidate.py
 
