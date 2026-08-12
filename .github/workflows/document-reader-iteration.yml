@@ -1,0 +1,55 @@
+name: Controlled document reader iteration
+
+on:
+  push:
+    branches: [agent/document-reader-iteration-1]
+    paths:
+      - '.control/document-reader-target'
+      - '.control/document-reader-canary'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5-mini
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install package
+        run: python -m pip install -e '.[test]'
+      - name: Deterministic preflight
+        run: python -m pytest -q
+      - name: Resolve explicit scope
+        id: scope
+        shell: bash
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -qx '.control/document-reader-target'; then
+            echo 'mode=target' >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD^ HEAD | grep -qx '.control/document-reader-canary'; then
+            echo 'mode=canary' >> "$GITHUB_OUTPUT"
+          else
+            echo 'No explicit document-reader sentinel in triggering commit' >&2
+            exit 2
+          fi
+      - name: Verify OpenAI secret
+        shell: bash
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo 'Missing OPENAI_API_KEY' >&2; exit 2; }
+      - name: Run one controlled comparison
+        run: python scripts/document_reader_iteration.py --mode '${{ steps.scope.outputs.mode }}' --output-dir document_reader_iteration
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: document-reader-${{ steps.scope.outputs.mode }}-${{ github.run_id }}
+          path: document_reader_iteration
+          if-no-files-found: warn
+          retention-days: 30
