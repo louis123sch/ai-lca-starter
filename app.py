@@ -21,7 +21,7 @@ from ai_lca.export import (
     process_structure_to_dataframe,
     review_bundle_to_json,
 )
-from ai_lca.geography import ecoinvent_location_hints
+from ai_lca.geography import ecoinvent_location_hints, parse_flow_location_hint
 from ai_lca.llm import extract_inventory_from_documents, extract_inventory_from_text
 from ai_lca.review import (
     apply_process_review,
@@ -332,7 +332,10 @@ if "extraction" in st.session_state:
     if st.button("2. Search Brightway candidates", disabled=not can_search):
         location_hints = ecoinvent_location_hints(context.operational_geography)
         candidate_map: dict[int, list[dict]] = {}
-        candidate_cache: dict[tuple[str, str], list[dict]] = {}
+        query_map: dict[int, str] = {}
+        db_map: dict[int, str] = {}
+        flow_hint_map: dict[int, list[str]] = {}
+        candidate_cache: dict[tuple[str, str, tuple[str, ...]], list[dict]] = {}
         progress = st.progress(0.0)
         included = edited_df[edited_df["include"] == True].reset_index(drop=True)  # noqa: E712
 
@@ -342,6 +345,7 @@ if "extraction" in st.session_state:
             query = str(row.get("name", "")).strip()
             direction = str(row.get("direction", "unknown")).strip().casefold()
             linked_process = str(row.get("linked_process_id", "") or "").strip()
+            query_map[flow_id] = query
 
             if linked_process and linked_process.lower() != "nan":
                 candidate_map[flow_id] = [
@@ -358,7 +362,11 @@ if "extraction" in st.session_state:
                 continue
 
             search_db = database_name
-            preferred_locations = location_hints
+            flow_hints = [
+                hint for hint in [*location_hints, *parse_flow_location_hint(query)]
+            ]
+            flow_hints = list(dict.fromkeys(flow_hints))  # dedupe, keep order
+            preferred_locations = flow_hints
             if direction == "emission":
                 if not biosphere_databases:
                     candidate_map[flow_id] = [{"error": "No biosphere database is available in this Brightway project."}]
@@ -366,8 +374,10 @@ if "extraction" in st.session_state:
                     continue
                 search_db = biosphere_databases[0]
                 preferred_locations = []
+            db_map[flow_id] = search_db
+            flow_hint_map[flow_id] = preferred_locations
 
-            cache_key = (search_db, query.casefold())
+            cache_key = (search_db, query.casefold(), tuple(preferred_locations))
             try:
                 if cache_key not in candidate_cache:
                     candidate_cache[cache_key] = search_candidates(
@@ -383,6 +393,9 @@ if "extraction" in st.session_state:
             progress.progress(n / max(len(included), 1))
 
         st.session_state["candidates"] = candidate_map
+        st.session_state["candidate_queries"] = query_map
+        st.session_state["candidate_dbs"] = db_map
+        st.session_state["candidate_flow_hints"] = flow_hint_map
         st.session_state["candidate_location_hints"] = location_hints
 
 if "candidates" in st.session_state and "inventory_df" in st.session_state:
@@ -418,7 +431,6 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
             linked_process = str(row.get("linked_process_id", "") or "").strip()
             if linked_process.lower() == "nan":
                 linked_process = ""
-            candidates = st.session_state["candidates"].get(flow_id, [])
             st.markdown(f"### {flow_name}")
 
             if linked_process:
@@ -430,8 +442,59 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                     "this to be excluded or explicitly modelled rather than inventing allocation/production structure."
                 )
                 continue
+
+            default_db = (
+                biosphere_databases[0] if direction == "emission" and biosphere_databases else database_name
+            )
+            search_db_for_flow = st.session_state.get("candidate_dbs", {}).get(flow_id, default_db)
+            default_query = st.session_state.get("candidate_queries", {}).get(flow_id, flow_name)
+            flow_hints = st.session_state.get("candidate_flow_hints", {}).get(flow_id, [])
+
+            query_col, button_col = st.columns([5, 1])
+            with query_col:
+                edited_query = st.text_input(
+                    "Search query",
+                    value=default_query,
+                    key=f"query_{flow_id}",
+                    label_visibility="collapsed",
+                    help=f"Searched against '{search_db_for_flow}'. Edit and re-search if the automatic match is wrong.",
+                )
+            with button_col:
+                rerun_search = st.button("Search", key=f"research_{flow_id}")
+            st.caption(f"Geography hint: {', '.join(flow_hints) if flow_hints else 'none'} · DB: {search_db_for_flow}")
+
+            if rerun_search:
+                try:
+                    new_hints = (
+                        []
+                        if direction == "emission"
+                        else list(
+                            dict.fromkeys(
+                                [
+                                    *ecoinvent_location_hints(context.operational_geography),
+                                    *parse_flow_location_hint(edited_query),
+                                ]
+                            )
+                        )
+                    )
+                    new_candidates = search_candidates(
+                        project_name=project_name,
+                        database_name=search_db_for_flow,
+                        query=edited_query,
+                        preferred_locations=new_hints,
+                        limit=candidate_limit,
+                    )
+                    st.session_state["candidates"][flow_id] = new_candidates
+                    st.session_state.setdefault("candidate_queries", {})[flow_id] = edited_query
+                    st.session_state.setdefault("candidate_flow_hints", {})[flow_id] = new_hints
+                    st.session_state.setdefault("candidate_dbs", {})[flow_id] = search_db_for_flow
+                except Exception as exc:
+                    st.session_state["candidates"][flow_id] = [{"error": str(exc)}]
+                st.rerun()
+
+            candidates = st.session_state["candidates"].get(flow_id, [])
             if not candidates:
-                st.warning("No candidates returned.")
+                st.warning("No candidates returned. Edit the search text above and press Search.")
                 continue
             if "error" in candidates[0]:
                 st.error(candidates[0]["error"])
