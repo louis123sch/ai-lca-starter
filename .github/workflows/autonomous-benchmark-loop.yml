@@ -42,6 +42,19 @@ jobs:
       - name: Install package
         run: python -m pip install -e ".[test]"
 
+      - name: Configure diagnosis and paper-level acceptance gates
+        run: python scripts/configure_autonomous_loop.py
+
+      - name: Persist loop-control configuration
+        run: |
+          git config user.name ai-lca-autonomous-benchmark
+          git config user.email actions@users.noreply.github.com
+          git add src/ai_lca/autonomous_benchmark_loop.py tests/test_autonomous_benchmark_gates.py
+          if ! git diff --cached --quiet; then
+            git commit -m "Use paper-level overall scores for autonomous acceptance"
+            git push origin HEAD:agent/autonomous-benchmark-loop
+          fi
+
       - name: Verify OpenAI secret
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
