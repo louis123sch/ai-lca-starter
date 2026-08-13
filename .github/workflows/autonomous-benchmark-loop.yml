@@ -2,11 +2,11 @@ name: Autonomous benchmark improvement loop
 
 on:
   workflow_dispatch:
-    inputs:
-      max_iterations:
-        description: Maximum total accepted/rejected repair iterations in the saved loop state
-        required: false
-        default: "8"
+  push:
+    branches:
+      - agent/autonomous-benchmark-loop
+    paths:
+      - .autonomy/restart_signal
 
 permissions:
   contents: write
@@ -63,11 +63,25 @@ jobs:
       - name: Run deterministic tests
         run: python -m pytest -q
 
-      - name: Run autonomous diagnose-repair-test loop
+      - name: Prepare exactly one monitored iteration
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('.autonomy/benchmark_loop_state.json')
+          state = json.loads(path.read_text(encoding='utf-8'))
+          current = int(state.get('iteration', 0))
+          state['status'] = 'active'
+          state['last_result'] = 'monitored_iteration_queued'
+          state['max_iterations'] = current + 1
+          path.write_text(json.dumps(state, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          print(f'Prepared monitored iteration {current + 1}')
+          PY
+
+      - name: Diagnose, patch and benchmark one iteration
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MAX_ITERATIONS: ${{ inputs.max_iterations }}
-        run: python -m ai_lca.autonomous_benchmark_loop --max-iterations "${MAX_ITERATIONS:-8}"
+        run: python -m ai_lca.autonomous_benchmark_loop --max-iterations 999
 
       - name: Upload loop evidence
         if: always()
