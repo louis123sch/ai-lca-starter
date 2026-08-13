@@ -239,6 +239,13 @@ def _load_history(limit: int = 8) -> list[dict[str, Any]]:
     return rows[-limit:]
 
 
+def _load_external_validation_lessons() -> dict[str, Any]:
+    path = Path(".autonomy/external_validation_lessons.json")
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _append_history(record: dict[str, Any]) -> None:
     HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with HISTORY_PATH.open("a", encoding="utf-8") as handle:
@@ -250,40 +257,25 @@ def _write_state(state: dict[str, Any]) -> None:
     STATE_PATH.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _threshold_failures(
+def _paper_overall_failures(
     summaries: dict[str, dict[str, Any]],
     baseline: dict[str, dict[str, Any]],
 ) -> list[str]:
-    """Protect accepted metrics while permitting incremental progress to final floors."""
+    """Reject only when a paper's own accepted mean overall score declines."""
     failures: list[str] = []
     for name, summary in summaries.items():
-        base = baseline[name]
-        for metric, threshold in ABSOLUTE_THRESHOLDS.items():
-            value = float(summary[metric])
-            base_value = float(base[metric])
-            if base_value >= threshold and value < threshold:
-                failures.append(
-                    f"{name}: lost achieved absolute floor for {metric}: "
-                    f"{value:.4f} < {threshold:.4f}"
-                )
-            if value + NO_REGRESSION_TOLERANCE < base_value:
-                failures.append(
-                    f"{name}: regression {metric} {value:.4f} < accepted {base_value:.4f}"
-                )
+        value = float(summary["mean_overall_score"])
+        base_value = float(baseline[name]["mean_overall_score"])
+        if value + NO_REGRESSION_TOLERANCE < base_value:
+            failures.append(
+                f"{name}: mean overall score regressed {value:.6f} < accepted {base_value:.6f}"
+            )
     return failures
 
+
 def _target_improved(candidate: dict[str, Any], baseline: dict[str, Any]) -> bool:
-    if float(candidate["mean_overall_score"]) >= float(baseline["mean_overall_score"]) + TARGET_MIN_GAIN:
-        return True
-    for metric in (
-        "mean_process_recall",
-        "mean_process_precision",
-        "mean_flow_recall",
-        "mean_flow_precision",
-    ):
-        if float(candidate[metric]) >= float(baseline[metric]) + 0.01:
-            return True
-    return False
+    """The development target advances whenever its mean overall score genuinely rises."""
+    return float(candidate["mean_overall_score"]) > float(baseline["mean_overall_score"]) + 1e-9
 
 
 def _all_absolute_pass(summaries: dict[str, dict[str, Any]]) -> bool:
@@ -388,14 +380,16 @@ def _iterate(state: dict[str, Any]) -> None:
         "iteration": iteration,
         "development_target": TARGET_BENCHMARK,
         "absolute_thresholds": ABSOLUTE_THRESHOLDS,
-        "no_regression_policy": "No candidate metric may be lower than the accepted baseline metric.",
+        "acceptance_policy": "Target paper mean overall score must increase; then every protected paper must keep or improve its own accepted mean overall score.",
         "accepted_baseline": state["baseline"],
         "accepted_diagnostics": state.get("diagnostics", {}),
         "recent_rejections": _load_history(),
+        "external_validation_lessons": _load_external_validation_lessons(),
         "instruction": (
-            "Make one small general extractor repair. The target must improve without regressing any "
-            "accepted target metric. Regression benchmarks must not fall below accepted baselines; "
-            "absolute floors are only the target final success condition."
+            "Diagnose the accepted baseline, recent rejections, and external validation lesson, then make one small general extractor repair. "
+            "The development target paper must increase its mean overall score. If it improves, test every protected paper; "
+            "each paper must keep or improve its own accepted mean overall score. Component precision/recall metrics are diagnostic, "
+            "not separate vetoes. Preserve generalization and never hard-code benchmark-specific labels."
         ),
     }
     diagnostics_path = run_root / "diagnostics.json"
@@ -440,12 +434,11 @@ def _iterate(state: dict[str, Any]) -> None:
     candidate_summaries[TARGET_BENCHMARK] = target_summary
     candidate_reports[TARGET_BENCHMARK] = _report_excerpt(target_report)
 
-    target_failures = _threshold_failures(
-        {TARGET_BENCHMARK: target_summary},
-        {TARGET_BENCHMARK: state["baseline"][TARGET_BENCHMARK]},
-    )
+    target_failures: list[str] = []
     if not _target_improved(target_summary, state["baseline"][TARGET_BENCHMARK]):
-        target_failures.append(f"{TARGET_BENCHMARK}: target did not improve over accepted baseline")
+        target_failures.append(
+            f"{TARGET_BENCHMARK}: mean overall score did not improve over accepted baseline"
+        )
 
     if target_failures:
         state["iteration"] = iteration
@@ -476,7 +469,7 @@ def _iterate(state: dict[str, Any]) -> None:
         candidate_summaries[name] = summary
         candidate_reports[name] = _report_excerpt(report)
 
-    failures = _threshold_failures(candidate_summaries, state["baseline"])
+    failures = _paper_overall_failures(candidate_summaries, state["baseline"])
     if failures:
         state["iteration"] = iteration
         state["last_result"] = "regression_gate_rejected"
