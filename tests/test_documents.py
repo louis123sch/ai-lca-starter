@@ -3,6 +3,7 @@ import io
 
 import fitz
 from docx import Document
+from openpyxl import Workbook
 
 from ai_lca.documents import (
     combine_document_evidence,
@@ -10,6 +11,7 @@ from ai_lca.documents import (
     extract_docx_text,
     extract_docx_visual_assets,
     extract_pdf_text,
+    extract_xlsx_text,
 )
 
 
@@ -58,6 +60,28 @@ def test_docx_visual_extraction_keeps_caption_context():
     assert assets[0].document == "supplement.docx"
     assert assets[0].mime_type == "image/png"
     assert "LCI values" in (assets[0].context or "")
+
+
+def test_xlsx_extraction_keeps_sheet_markers():
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Inventory"
+    sheet.append(["Flow", "Amount", "Unit"])
+    sheet.append(["Electricity", 5, "kWh"])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+
+    text = extract_xlsx_text(buffer.getvalue())
+    assert "[SHEET: Inventory]" in text
+    assert "Electricity\t5\tkWh" in text
+
+
+def test_document_dispatch_accepts_xlsx():
+    workbook = Workbook()
+    workbook.active.append(["Natural gas input", "1.2 kg"])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    assert "Natural gas input" in extract_document_text(buffer.getvalue(), "supplement.xlsx")
 
 
 def test_document_dispatch_accepts_docx():

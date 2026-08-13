@@ -17,6 +17,7 @@ from docx.oxml.table import CT_Tbl
 from docx.oxml.text.paragraph import CT_P
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from openpyxl import load_workbook
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,32 @@ def extract_docx_text(docx_bytes: bytes) -> str:
     combined = "\n\n".join(chunks).strip()
     if not combined:
         raise ValueError("No readable text was found in the DOCX")
+    return combined
+
+
+def extract_xlsx_text(xlsx_bytes: bytes) -> str:
+    """Extract sheet text from an Excel workbook while retaining sheet provenance markers."""
+    if not xlsx_bytes:
+        raise ValueError("Excel workbook is empty")
+
+    try:
+        workbook = load_workbook(io.BytesIO(xlsx_bytes), data_only=True, read_only=True)
+    except Exception as exc:
+        raise ValueError("Could not read the Excel workbook. Use .xlsx or .xlsm.") from exc
+
+    chunks: list[str] = []
+    for sheet in workbook.worksheets:
+        rows: list[str] = []
+        for row in sheet.iter_rows(values_only=True):
+            cells = ["" if value is None else str(value).strip() for value in row]
+            if any(cells):
+                rows.append("\t".join(cells))
+        if rows:
+            chunks.append(f"[SHEET: {sheet.title}]\n" + "\n".join(rows))
+
+    combined = "\n\n".join(chunks).strip()
+    if not combined:
+        raise ValueError("No readable data was found in the Excel workbook")
     return combined
 
 
@@ -294,7 +321,9 @@ def extract_document_text(file_bytes: bytes, filename: str) -> str:
         return extract_docx_text(file_bytes)
     if suffix == ".txt":
         return extract_text_fixture(file_bytes)
-    raise ValueError("Unsupported document type. Use PDF, DOCX, or UTF-8 TXT.")
+    if suffix in {".xlsx", ".xlsm"}:
+        return extract_xlsx_text(file_bytes)
+    raise ValueError("Unsupported document type. Use PDF, DOCX, XLSX, or UTF-8 TXT.")
 
 
 def extract_document_visual_assets(file_bytes: bytes, filename: str) -> tuple[list[VisualAsset], list[str]]:

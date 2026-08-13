@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: ai-lca-starter
-Version: 0.1.0
-Summary: Human-in-the-loop AI foreground inventory extraction and Brightway candidate matching
+Version: 0.4.0
+Summary: Human-in-the-loop paper-to-Brightway foreground LCA extractor
 Requires-Python: <3.14,>=3.11
 Requires-Dist: streamlit>=1.45
 Requires-Dist: pandas>=2.2
@@ -9,6 +9,7 @@ Requires-Dist: pydantic>=2.8
 Requires-Dist: openai>=1.57
 Requires-Dist: python-dotenv>=1.0
 Requires-Dist: PyMuPDF>=1.24
+Requires-Dist: python-docx>=1.1
 Requires-Dist: bw2data>=4.0
 Provides-Extra: test
 Requires-Dist: pytest>=8.0; extra == "test"

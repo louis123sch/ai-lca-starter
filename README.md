@@ -34,6 +34,7 @@ Supported inputs:
 - pasted text;
 - PDF, including native text plus selected embedded figures/pages for multimodal transcription;
 - Word `.docx`, including paragraphs, tables and selected embedded visual evidence;
+- Excel `.xlsx`/`.xlsm`, read sheet-by-sheet as tab-separated tabular evidence;
 - multiple main/supplementary documents in one extraction.
 
 Visual evidence is transcribed before LCA interpretation. The visual stage is evidence transcription only; it does not decide process structure or map to ecoinvent.
@@ -127,21 +128,6 @@ streamlit run app.py
 8. Search candidates and review each selected mapping.
 9. Download the audit/review bundle.
 10. If the strict write validator passes, explicitly confirm and create a new Brightway foreground database.
-
-## Benchmarking and generalisation
-
-Historical benchmark results and gold standards are preserved. See `benchmarks/BENCHMARK_POLICY.md` for the development/regression/unseen/holdout rules and `AUTONOMOUS_ITERATION_PROTOCOL.md` for the reusable autonomous iteration method.
-
-The next validation phase should use a frozen extractor SHA and a new batch of untouched papers rather than repeatedly tuning against the existing 001–006 suite.
-
-A benchmark can still be run from the CLI when source files are available locally:
-
-```bash
-ai-lca-benchmark live \
-  --expected benchmarks/hermesmann_2022/expected.json \
-  --source "path/to/main-paper.pdf" "path/to/supplement.docx" \
-  --runs 3
-```
 
 ## Current finish line
 

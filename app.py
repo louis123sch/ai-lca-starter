@@ -88,8 +88,8 @@ ingestion_warnings: list[str] = []
 
 with document_tab:
     uploaded_documents = st.file_uploader(
-        "Upload the paper and any supplementary PDF/Word documents",
-        type=["pdf", "docx"],
+        "Upload the paper and any supplementary PDF/Word/Excel documents",
+        type=["pdf", "docx", "xlsx", "xlsm"],
         accept_multiple_files=True,
     )
     if uploaded_documents:
