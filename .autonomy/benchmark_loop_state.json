@@ -126,11 +126,11 @@
     }
   },
   "iteration": 9,
-  "last_result": "regression_gate_rejected",
+  "last_result": "max_iterations_reached",
   "max_iterations": 9,
   "no_regression_tolerance": 0.0,
   "source_run_id": "31602098629",
-  "status": "active",
+  "status": "max_iterations_reached",
   "target_benchmark": "mycelium_2024",
   "target_min_gain": 0.005,
   "version": 1
