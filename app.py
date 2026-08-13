@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from ai_lca.brightway_search import (
     list_biosphere_databases,
     list_databases,
+    normalize_search_query,
     search_candidates,
 )
 from ai_lca.brightway_writer import build_write_plan, write_foreground_database
@@ -30,6 +31,45 @@ from ai_lca.review import (
 )
 from ai_lca.runtime import extractor_version, git_sha
 
+def _default_search_text(row) -> str:
+    """Prefer an explicit source-printed background-process identifier over the plain flow name."""
+    hint = str(row.get("background_process_hint", "") or "").strip()
+    if hint and hint.lower() != "nan":
+        return hint
+    return str(row.get("name", "") or "").strip()
+
+
+def _row_unit(row) -> str:
+    unit = str(row.get("unit", "") or "").strip()
+    return "" if unit.lower() == "nan" else unit
+
+
+def _search_display_text(row) -> str:
+    """Default search box text: the search query, annotated with the flow's unit for clarity."""
+    base = _default_search_text(row)
+    unit = _row_unit(row)
+    if unit and not base.rstrip().endswith(f"({unit})"):
+        return f"{base} ({unit})"
+    return base
+
+
+def _strip_unit_suffix(query: str, unit: str) -> str:
+    """Remove a trailing '(<unit>)' annotation before the text is actually searched.
+
+    The unit is shown in the search box purely for human readability -- Brightway's
+    full-text search requires every query word to match, so a literal unit word left in
+    the query risks the same silent hard-filtering that a location code caused.
+    """
+    unit = (unit or "").strip()
+    if not unit:
+        return query
+    suffix = f"({unit})"
+    stripped = query.rstrip()
+    if stripped.endswith(suffix):
+        return stripped[: -len(suffix)].strip()
+    return query
+
+
 load_dotenv()
 
 st.set_page_config(page_title="AI-LCA Foreground Builder", layout="wide")
@@ -42,8 +82,9 @@ st.caption(
 with st.sidebar:
     st.header("Configuration")
     st.caption(f"Extractor {extractor_version()} | commit {(git_sha() or 'unknown')[:10]}")
-    model = st.text_input("OpenAI model", value=os.getenv("OPENAI_MODEL", "gpt-5-mini"))
-    project_name = st.text_input("Brightway project", value=os.getenv("BRIGHTWAY_PROJECT", ""))
+    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    project_name = os.getenv("BRIGHTWAY_PROJECT", "")
+    st.caption(f"OpenAI model: {model} · Brightway project: {project_name or 'not set in .env'}")
     candidate_limit = st.slider("Candidates per flow", 3, 20, 8)
 
     database_name = ""
@@ -287,6 +328,14 @@ if "extraction" in st.session_state:
                 options=[""] + current_process_ids,
                 help="Use only for a reviewed explicit foreground-to-foreground input link.",
             ),
+            "background_process_hint": st.column_config.TextColumn(
+                "Background process hint",
+                help=(
+                    "Verbatim technical background-process identifier, only when the source explicitly printed one "
+                    "(e.g. a supplementary LCA-software process export). Used as the default Brightway search text "
+                    "instead of the plain flow name when present. Edit or clear it if it looks wrong."
+                ),
+            ),
             "document": st.column_config.TextColumn("Document", disabled=True),
             "page": st.column_config.NumberColumn("Page", disabled=True),
             "paragraph": st.column_config.NumberColumn("Paragraph", disabled=True),
@@ -342,7 +391,9 @@ if "extraction" in st.session_state:
         for n, (_, row) in enumerate(included.iterrows(), start=1):
             flow_id_raw = row.get("flow_id", n - 1)
             flow_id = int(flow_id_raw) if pd.notna(flow_id_raw) else n - 1
-            query = str(row.get("name", "")).strip()
+            base_query = _default_search_text(row)
+            unit = _row_unit(row)
+            query = _search_display_text(row)
             direction = str(row.get("direction", "unknown")).strip().casefold()
             linked_process = str(row.get("linked_process_id", "") or "").strip()
             query_map[flow_id] = query
@@ -356,14 +407,9 @@ if "extraction" in st.session_state:
                 ]
                 progress.progress(n / max(len(included), 1))
                 continue
-            if direction == "output":
-                candidate_map[flow_id] = []
-                progress.progress(n / max(len(included), 1))
-                continue
-
             search_db = database_name
             flow_hints = [
-                hint for hint in [*location_hints, *parse_flow_location_hint(query)]
+                hint for hint in [*location_hints, *parse_flow_location_hint(base_query)]
             ]
             flow_hints = list(dict.fromkeys(flow_hints))  # dedupe, keep order
             preferred_locations = flow_hints
@@ -377,13 +423,14 @@ if "extraction" in st.session_state:
             db_map[flow_id] = search_db
             flow_hint_map[flow_id] = preferred_locations
 
-            cache_key = (search_db, query.casefold(), tuple(preferred_locations))
+            search_text = _strip_unit_suffix(query, unit)
+            cache_key = (search_db, search_text.casefold(), tuple(preferred_locations))
             try:
                 if cache_key not in candidate_cache:
                     candidate_cache[cache_key] = search_candidates(
                         project_name=project_name,
                         database_name=search_db,
-                        query=query,
+                        query=search_text,
                         preferred_locations=preferred_locations,
                         limit=candidate_limit,
                     )
@@ -394,6 +441,7 @@ if "extraction" in st.session_state:
 
         st.session_state["candidates"] = candidate_map
         st.session_state["candidate_queries"] = query_map
+        st.session_state["original_queries"] = dict(query_map)
         st.session_state["candidate_dbs"] = db_map
         st.session_state["candidate_flow_hints"] = flow_hint_map
         st.session_state["candidate_location_hints"] = location_hints
@@ -437,18 +485,33 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                 st.info(f"Explicit foreground link → {linked_process}. No ecoinvent mapping is needed for this exchange.")
                 continue
             if direction == "output":
-                st.warning(
-                    "Additional output/co-product: no background mapping is proposed. The strict writer will require "
-                    "this to be excluded or explicitly modelled rather than inventing allocation/production structure."
+                exclude_output = st.checkbox(
+                    "Exclude this output/co-product from the write — I don't want to model it",
+                    key=f"exclude_output_{flow_id}",
                 )
-                continue
+                if exclude_output:
+                    inv_df.loc[inv_df["flow_id"] == flow_id, "include"] = False
+                    st.session_state["inventory_df"] = inv_df
+                    st.info("Excluded from the write. Amount/evidence stay in the reviewed inventory export.")
+                    continue
+                st.caption(
+                    "Additional output/co-product (e.g. a recycling credit/avoided-burden flow). Map it to a real "
+                    "Brightway node below and it will be written as a technosphere exchange using its reviewed "
+                    f"signed amount ({row.get('amount')} {row.get('unit', '')}) — no allocation/production model is invented."
+                )
 
             default_db = (
                 biosphere_databases[0] if direction == "emission" and biosphere_databases else database_name
             )
             search_db_for_flow = st.session_state.get("candidate_dbs", {}).get(flow_id, default_db)
-            default_query = st.session_state.get("candidate_queries", {}).get(flow_id, flow_name)
+            default_query = st.session_state.get("candidate_queries", {}).get(
+                flow_id, _search_display_text(row)
+            )
             flow_hints = st.session_state.get("candidate_flow_hints", {}).get(flow_id, [])
+            unit = _row_unit(row)
+            original_query = st.session_state.get("original_queries", {}).get(
+                flow_id, _search_display_text(row)
+            )
 
             query_col, button_col = st.columns([5, 1])
             with query_col:
@@ -461,10 +524,17 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                 )
             with button_col:
                 rerun_search = st.button("Search", key=f"research_{flow_id}")
-            st.caption(f"Geography hint: {', '.join(flow_hints) if flow_hints else 'none'} · DB: {search_db_for_flow}")
+            st.caption(f"Original: {original_query}")
+            search_text_preview = _strip_unit_suffix(edited_query, unit)
+            normalized_query = normalize_search_query(search_text_preview)
+            caption = f"Geography hint: {', '.join(flow_hints) if flow_hints else 'none'} · DB: {search_db_for_flow}"
+            if normalized_query != edited_query.strip():
+                caption += f' · Searching as: "{normalized_query}" (unit/system-model labels are shown but not searched)'
+            st.caption(caption)
 
             if rerun_search:
                 try:
+                    search_text = _strip_unit_suffix(edited_query, unit)
                     new_hints = (
                         []
                         if direction == "emission"
@@ -472,7 +542,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                             dict.fromkeys(
                                 [
                                     *ecoinvent_location_hints(context.operational_geography),
-                                    *parse_flow_location_hint(edited_query),
+                                    *parse_flow_location_hint(search_text),
                                 ]
                             )
                         )
@@ -480,7 +550,7 @@ if "candidates" in st.session_state and "inventory_df" in st.session_state:
                     new_candidates = search_candidates(
                         project_name=project_name,
                         database_name=search_db_for_flow,
-                        query=edited_query,
+                        query=search_text,
                         preferred_locations=new_hints,
                         limit=candidate_limit,
                     )

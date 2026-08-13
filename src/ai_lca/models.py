@@ -209,6 +209,16 @@ class InventoryFlow(BaseModel):
         default=None,
         description="Basis/denominator, e.g. per kg H2, per year, per plant, per functional unit.",
     )
+    background_process_hint: str | None = Field(
+        default=None,
+        description=(
+            "Verbatim background-database process identifier for this flow, copied only when explicitly "
+            "printed in the supplied source material (e.g. a supplementary LCA-software process tree/export) "
+            "in a format such as 'activity name | reference product | system model, type - location'. "
+            "Null unless such an explicit identifier for this exact flow is printed in the source; never "
+            "constructed or inferred from the plain-language flow name alone."
+        ),
+    )
     notes: str | None = None
     evidence: SourceEvidence
 

@@ -18,6 +18,7 @@ _REVIEWED_FIELDS = (
     "linked_process_id",
     "component_or_stage",
     "basis",
+    "background_process_hint",
     "notes",
 )
 
@@ -86,6 +87,7 @@ def extraction_to_dataframe(extraction: InventoryExtraction) -> pd.DataFrame:
                 "linked_process_id": flow.linked_process_id,
                 "component_or_stage": flow.component_or_stage,
                 "basis": flow.basis,
+                "background_process_hint": flow.background_process_hint,
                 "document": flow.evidence.document,
                 "page": flow.evidence.page,
                 "paragraph": flow.evidence.paragraph,

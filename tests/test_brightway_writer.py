@@ -51,7 +51,7 @@ def test_write_plan_accepts_mapped_input_emission_and_foreground_link():
     ]
 
 
-def test_write_plan_blocks_missing_amount_and_unmodelled_output():
+def test_write_plan_blocks_missing_amount_and_unmapped_output():
     inv = pd.DataFrame(
         [
             {"include": True, "flow_id": 0, "process_id": "p1", "name": "water", "amount": None, "unit": "kg", "direction": "input", "linked_process_id": ""},
@@ -61,7 +61,35 @@ def test_write_plan_blocks_missing_amount_and_unmodelled_output():
     plan = build_write_plan(extraction(), inv, pd.DataFrame())
     assert plan.ready is False
     assert any("no reviewed numeric amount" in blocker for blocker in plan.blockers)
-    assert any("additional output/co-product" in blocker for blocker in plan.blockers)
+    assert any("no selected Brightway mapping" in blocker for blocker in plan.blockers)
+
+
+def test_write_plan_accepts_mapped_output_as_avoided_burden_credit():
+    inv = pd.DataFrame(
+        [
+            {"include": True, "flow_id": 0, "process_id": "p1", "name": "scrap steel", "amount": -880.0, "unit": "kg", "direction": "output", "linked_process_id": ""},
+        ]
+    )
+    mappings = pd.DataFrame(
+        [
+            {"flow_id": 0, "database": "ecoinvent", "code": "steel-market-code", "name": "market for steel", "unit": "kilogram"},
+        ]
+    )
+    plan = build_write_plan(extraction(), inv, mappings)
+    assert plan.ready is True
+    assert plan.exchanges == [
+        {
+            "flow_id": 0,
+            "process_id": "p1",
+            "flow_name": "scrap steel",
+            "amount": -880.0,
+            "unit": "kg",
+            "exchange_type": "technosphere_background",
+            "target_database": "ecoinvent",
+            "target_code": "steel-market-code",
+            "target_name": "market for steel",
+        }
+    ]
 
 
 def test_write_plan_blocks_unit_mismatch_without_conversion():

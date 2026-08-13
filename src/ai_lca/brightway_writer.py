@@ -73,10 +73,12 @@ def build_write_plan(
 ) -> WritePlan:
     """Validate that reviewed rows can be written without inventing modelling choices.
 
-    The writer is intentionally strict. It supports mapped technosphere inputs,
-    mapped biosphere emissions, and explicit foreground-to-foreground inputs.
-    Additional co-products/outputs remain a human modelling decision and block the
-    write until they are excluded or represented explicitly in a future extension.
+    The writer is intentionally strict. It supports mapped technosphere inputs, mapped
+    technosphere outputs/co-products (e.g. recycling credits, avoided-burden flows --
+    written as a technosphere exchange using the flow's own reviewed signed amount, with
+    no allocation/production math invented), mapped biosphere emissions, and explicit
+    foreground-to-foreground inputs. An output/co-product still blocks the write until
+    it is either excluded or given an explicit human-selected Brightway mapping.
     """
     blockers: list[str] = []
     warnings: list[str] = []
@@ -160,13 +162,7 @@ def build_write_plan(
             )
             continue
 
-        if direction == "output":
-            blockers.append(
-                f"Flow {flow_id} ({flow_name}) is an additional output/co-product. "
-                "The strict v1 writer will not invent a production/allocation model; review or exclude it before writing."
-            )
-            continue
-        if direction not in {"input", "emission"}:
+        if direction not in {"input", "emission", "output"}:
             blockers.append(
                 f"Flow {flow_id} ({flow_name}) has direction {direction!r}; review it before writing."
             )

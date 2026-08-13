@@ -56,6 +56,7 @@ The v0.4 writer supports:
 
 - one reviewed production activity per retained foreground process;
 - mapped technosphere inputs;
+- mapped technosphere outputs/co-products (e.g. recycling credits, avoided-burden flows) — written using the flow's own reviewed signed amount, exactly as reviewed, with no allocation/production percentage invented;
 - mapped biosphere emissions;
 - explicit foreground-to-foreground input links;
 - extraction/version metadata on created foreground activities.
@@ -64,9 +65,8 @@ It deliberately blocks writing when:
 
 - an included quantitative exchange has no amount;
 - a process lacks a reviewed reference product/unit;
-- an input/emission has no selected mapping;
+- an input/emission/output has no selected mapping and has not been explicitly excluded;
 - source and mapped units differ and would require an unapproved conversion;
-- an additional output/co-product would require an allocation/production modelling decision;
 - a flow direction is unresolved.
 
 The writer never overwrites an existing Brightway database.

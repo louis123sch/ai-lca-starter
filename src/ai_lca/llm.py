@@ -53,7 +53,7 @@ Rules:
 1. Every flow must be attached to one supplied process ID. Never create a new process ID or implicit subprocess.
 2. Extract only flows that the source indicates are part of the MODELED foreground LCI. Do not extract catalysts, solvents, materials, operating conditions, or technology options merely because they appear in descriptive prose. Prefer explicit LCI tables and inventory-analysis sections.
 3. Explicit component lists, BoP/stack tables, component tables, numbered inventory lists, supplementary tables, and transcribed visual tables are valid source evidence. Attach their listed components as foreground input flows to the appropriate locked process. Do not promote components into subprocesses.
-4. Preserve printed component/flow names and word order rather than canonicalising them into ecoinvent-style wording. If multiple source locations use variants, prefer one source-supported name and record ambiguity in notes/warnings.
+4. Preserve printed component/flow names and word order in `name` rather than canonicalising them into ecoinvent-style wording. If multiple source locations use variants, prefer one source-supported name and record ambiguity in notes/warnings. Use `background_process_hint` (rule 16) for an explicit technical identifier; never fold that wording into `name` itself.
 5. Never invent an amount, unit, material, process, functional unit, voltage level, market type, production route, document, page, table, or paragraph.
 6. If the paper says only 'electricity', extract 'electricity'. Do not turn it into 'medium-voltage electricity', 'market for electricity', or another background dataset name unless the source states that detail.
 7. If a flow is mentioned but no amount is given, amount must be null.
@@ -65,6 +65,7 @@ Rules:
 13. Treat [VISUAL EVIDENCE: ...] blocks exactly like source evidence: use only visibly transcribed content and preserve provenance.
 14. Include a short evidence_text snippet for every flow. Populate document/page/paragraph/table only from explicit source markers.
 15. Record ambiguity, missing denominators, allocation issues, unclear units, or possible double counting in assumptions_or_warnings.
+16. A supplied document may include a separate technical process-database export alongside the main paper text — for example an LCA-software "upstream tree"/contribution list, process network table, or similar SimaPro/OpenLCA/GaBi-style output — giving a verbatim background-database identifier for the same material, energy, transport or service, typically formatted like 'activity name | reference product | system model, type - location'. When such an identifier is explicitly printed and clearly corresponds to the flow you are extracting, copy it EXACTLY into background_process_hint. Never construct, canonicalise, paraphrase, translate units within, or guess this identifier. Leave background_process_hint null when no explicit technical identifier is printed for that exact flow, or when the correspondence between the plain-language flow and the technical export entry is ambiguous; note real ambiguity in assumptions_or_warnings instead of guessing.
 
 Protected extraction invariants:
 - explicit component lists are valid inventory evidence;
