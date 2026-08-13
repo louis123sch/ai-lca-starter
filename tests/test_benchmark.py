@@ -103,11 +103,19 @@ def test_benchmark_catches_overdecomposition_and_dataset_name_leakage():
     assert report.flow_precision < 1.0
 
 
-def test_flow_prompt_keeps_explicit_component_tables_as_inventory_flows():
-    prompt = FLOW_SYSTEM_PROMPT.casefold()
-    assert "explicit component lists" in prompt
-    assert "foreground input flow" in prompt
-    assert "do not reclassify such tabulated components as background subprocesses" in prompt
+def test_prompts_distinguish_owned_unit_process_inventories_from_nested_stages():
+    from ai_lca.llm import STRUCTURE_SYSTEM_PROMPT
+
+    flow_prompt = FLOW_SYSTEM_PROMPT.casefold()
+    assert "explicit component lists" in flow_prompt
+    assert "foreground input flow" in flow_prompt
+    assert "do not reclassify such tabulated components as background subprocesses" in flow_prompt
+
+    structure_prompt = STRUCTURE_SYSTEM_PROMPT.casefold()
+    assert "activity-owned quantitative lci rows" in structure_prompt
+    assert "merely partitioning one aggregate inventory by life-cycle stage is not enough" in structure_prompt
+    assert "terminal activity need not feed a downstream foreground process" in structure_prompt
+    assert "do not additionally classify the chain's title" in structure_prompt
 
 
 def test_published_result_comparison_is_zero_for_paper_values():
