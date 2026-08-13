@@ -1,0 +1,47 @@
+{
+  "source": "recovered Mycelium 99.5 candidate regression validation",
+  "source_run_id": 31687505633,
+  "reader_model": "gpt-5.6",
+  "reader_reasoning_effort": "medium",
+  "candidate_intent": "Promote source-named activities that own explicit quantitative foreground inventory instead of collapsing them into one assessed product-system node.",
+  "results": {
+    "mycelium_2024": {
+      "accepted_baseline_mean_overall": 0.4991736513414684,
+      "candidate_mean_overall": 0.9954545454545457,
+      "process_recall": 1.0,
+      "process_precision": 0.9545454545454546,
+      "flow_recall": 1.0,
+      "flow_precision": 1.0,
+      "outcome": "major improvement"
+    },
+    "hermesmann_2022": {
+      "accepted_baseline_mean_overall": 0.9966942148760334,
+      "candidate_mean_overall": 0.9966942148760334,
+      "outcome": "preserved"
+    },
+    "yang_2024": {
+      "accepted_baseline_mean_overall": 0.9659090909090912,
+      "candidate_mean_overall": 0.3033,
+      "outcome": "major regression",
+      "diagnosis": "The rule over-promoted quantified stages/subprocesses inside an already modelled product system into separate foreground processes. Six processes were extracted where two assessed foreground systems were expected; process recall remained 100% but process precision fell to about 33% and flow matching collapsed because flows were attached to the newly split subprocesses."
+    },
+    "gonzales_calienes_2025": {
+      "accepted_baseline_mean_overall": 0.9959459459459462,
+      "candidate_mean_overall": 0.9865,
+      "outcome": "small regression"
+    },
+    "afzal_2023": {
+      "accepted_baseline_mean_overall": 0.9900000000000003,
+      "candidate_mean_overall": 0.9218,
+      "outcome": "regression",
+      "diagnosis": "Processes and flow recall remained strong, but extra product flows and functional-unit degradation reduced the paper's overall score."
+    },
+    "terlouw_2021": {
+      "accepted_baseline_mean_overall": 0.8037537810042349,
+      "candidate_mean_overall": 0.8890,
+      "outcome": "improvement"
+    }
+  },
+  "generalization_lesson": "Preserve the Mycelium/Terlouw gain, but distinguish an independently modelled foreground process from a quantified stage or subprocess nested inside an already retained assessed product system. Quantitative data alone is not sufficient evidence for promotion. Prefer evidence that the study treats the activity as a separately modelled foreground process with its own process boundary/reference function or explicit inter-process inventory ownership. Do not hard-code paper names or benchmark-specific labels.",
+  "acceptance_rule": "First require the development target paper's mean_overall_score to increase. Then test every protected paper. Accept only if each paper's own mean_overall_score is unchanged or higher than its accepted baseline. Individual component metrics remain diagnostic and are not independent vetoes."
+}
