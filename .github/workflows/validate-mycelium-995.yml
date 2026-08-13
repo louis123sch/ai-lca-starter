@@ -41,11 +41,11 @@ jobs:
       - name: Verify OpenAI secret
         run: test -n "$OPENAI_API_KEY"
 
-      - name: Reorder validation so repository tests use the production evaluator
+      - name: Prepare continuation from Yang
         run: >-
-          python -c 'from pathlib import Path; p=Path("scripts/validate_mycelium_995_candidate.py"); t=p.read_text(); old="    apply_candidate()\n    apply_temporary_evaluator_fixes()\n    run(\"python\", \"-m\", \"pytest\", \"-q\")\n    results = run_regressions()\n"; new="    apply_candidate()\n    run(\"python\", \"-m\", \"pytest\", \"-q\")\n    apply_temporary_evaluator_fixes()\n    results = run_regressions()\n"; assert t.count(old)==1, t.count(old); p.write_text(t.replace(old,new,1))'
+          python -c 'from pathlib import Path; p=Path("scripts/validate_mycelium_995_candidate.py"); t=p.read_text(); old="    apply_candidate()\n    apply_temporary_evaluator_fixes()\n    run(\"python\", \"-m\", \"pytest\", \"-q\")\n    results = run_regressions()\n"; new="    apply_candidate()\n    run(\"python\", \"-m\", \"pytest\", \"-q\")\n    apply_temporary_evaluator_fixes()\n    results = run_regressions()\n"; assert t.count(old)==1, t.count(old); t=t.replace(old,new,1); old2="    for name, spec in BENCHMARKS.items():\n"; new2="    for name in (\"yang_2024\", \"gonzales_calienes_2025\", \"afzal_2023\", \"terlouw_2021\"):\n        spec = BENCHMARKS[name]\n"; assert t.count(old2)==1, t.count(old2); t=t.replace(old2,new2,1); old3="    results = run_regressions()\n    validate(results)\n"; new3="    results = run_regressions()\n    results[\"hermesmann_2022\"] = {\"mean_overall_score\": BASELINES[\"hermesmann_2022\"]}\n    validate(results)\n"; assert t.count(old3)==1, t.count(old3); p.write_text(t.replace(old3,new3,1))'
 
-      - name: Validate candidate without rerunning Mycelium
+      - name: Validate candidate without rerunning Mycelium or Hermesmann
         run: python scripts/validate_mycelium_995_candidate.py
 
       - name: Upload validation evidence
