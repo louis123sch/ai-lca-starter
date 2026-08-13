@@ -1,0 +1,51 @@
+diff --git a/src/ai_lca/llm.py b/src/ai_lca/llm.py
+index 64f8081..6db410e 100644
+--- a/src/ai_lca/llm.py
++++ b/src/ai_lca/llm.py
+@@ -22,7 +22,7 @@ B. Classify every such candidate by its role in the actual LCA model. A determin
+ 
+ Use exactly these role meanings:
+ - assessed_product_system: a product system, pathway, configuration, or alternative that is itself assessed/reported by the LCA on the study functional-unit basis.
+-- interconnected_foreground_process: a separately modelled foreground activity with its own reference product or explicit quantified foreground exchange to another retained activity.
++- interconnected_foreground_process: a separately modelled foreground activity with its own reference product or explicit quantified foreground exchange to another retained activity, or one that the source explicitly identifies as a distinct foreground unit process with activity-owned quantitative LCI rows.
+ - internal_stage: a unit operation, life-cycle stage, inventory section, or internal bookkeeping stage belonging to a retained product system rather than an independently modelled activity.
+ - shared_supporting_activity: a foreground-looking service/infrastructure/activity shared by assessed alternatives but not itself an independently assessed product system and not evidenced as a separately interconnected foreground process.
+ - background_supply: electricity, fuels, materials, transport, chemicals, water, waste treatment or other supplied activities that belong as inventory exchanges/background data unless the source explicitly models them as foreground.
+@@ -33,7 +33,7 @@ Rules:
+ 2. Prefer the smallest foreground graph justified by source evidence. A process-flow diagram can show several unit operations while the LCA still models one product system.
+ 3. A table section, component list, stack/BoP section, construction/manufacturing/operation/maintenance/transport/replacement/end-of-life section, or shared functional-unit basis does not by itself establish a separate foreground process.
+ 4. Preserve genuinely separate assessed alternatives/configurations even when they share technologies or upstream inputs.
+-5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity, normally through its own reference product/reference unit or an explicit quantified foreground exchange. Do not manufacture a reference product to justify promotion.
++5. A candidate should be interconnected_foreground_process only when the source supports it as a distinct foreground activity. For an activity-owned LCI block to establish this role, the source must explicitly identify the candidate as a distinct foreground unit process or activity, assign quantitative inventory rows (inputs and/or outputs) to it, and distinguish that ownership from the aggregate inventory of the containing product system. Merely partitioning one aggregate inventory by life-cycle stage is not enough; neither is a component or equipment group, process-diagram box, background database activity, or impact/result column, even when quantities are shown. A quantified named intermediate passed between activity-owned blocks is strong evidence of separate foreground ownership. A terminal activity need not feed a downstream foreground process, but it qualifies from its own inventory block only when the source explicitly models it quantitatively as a foreground activity. Do not manufacture a reference product to justify promotion. When separately owned unit-process blocks together describe one foreground chain, do not additionally classify the chain's title or functional-unit product label as assessed_product_system; it is a container unless the source presents it as a separately compared alternative or configuration with a non-duplicative inventory block.
+ 6. Shared support activities should remain shared_supporting_activity unless the source explicitly gives them the independent foreground-activity status described above.
+ 7. Do not turn background supplies such as electricity, natural gas, water, steel, transport, or chemicals into foreground processes unless the source explicitly models them as such.
+ 8. Do not infer voltage level, production technology, market dataset, geography code, reference product, unit, or other ecoinvent detail from generic wording.
+diff --git a/tests/test_benchmark.py b/tests/test_benchmark.py
+index 8f6f6c1..c994227 100644
+--- a/tests/test_benchmark.py
++++ b/tests/test_benchmark.py
+@@ -103,11 +103,19 @@ def test_benchmark_catches_overdecomposition_and_dataset_name_leakage():
+     assert report.flow_precision < 1.0
+ 
+ 
+-def test_flow_prompt_keeps_explicit_component_tables_as_inventory_flows():
+-    prompt = FLOW_SYSTEM_PROMPT.casefold()
+-    assert "explicit component lists" in prompt
+-    assert "foreground input flow" in prompt
+-    assert "do not reclassify such tabulated components as background subprocesses" in prompt
++def test_prompts_distinguish_owned_unit_process_inventories_from_nested_stages():
++    from ai_lca.llm import STRUCTURE_SYSTEM_PROMPT
++
++    flow_prompt = FLOW_SYSTEM_PROMPT.casefold()
++    assert "explicit component lists" in flow_prompt
++    assert "foreground input flow" in flow_prompt
++    assert "do not reclassify such tabulated components as background subprocesses" in flow_prompt
++
++    structure_prompt = STRUCTURE_SYSTEM_PROMPT.casefold()
++    assert "activity-owned quantitative lci rows" in structure_prompt
++    assert "merely partitioning one aggregate inventory by life-cycle stage is not enough" in structure_prompt
++    assert "terminal activity need not feed a downstream foreground process" in structure_prompt
++    assert "do not additionally classify the chain's title" in structure_prompt
+ 
+ 
+ def test_published_result_comparison_is_zero_for_paper_values():
